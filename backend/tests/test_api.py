@@ -12,8 +12,12 @@ def kiosk_employee_code():
     return "EMP900"
 
 
-def test_health_and_docs(client):
-    assert client.get("/api/health").json() == {"status": "ok"}
+def test_health_reports_frontend_state(client):
+    health = client.get("/api/health").json()
+    assert health["status"] == "ok"
+    # The checked-out repo ships the frontend, so health must confirm it is there.
+    assert health["frontend_ready"] is True, health
+    assert health["missing_files"] == []
 
 
 def test_login_rejects_bad_credentials(client):

@@ -30,6 +30,12 @@ cp .env.example .env                 # edit JWT_SECRET before anything real
 | http://localhost:8000/attendance?tenant=REST001 | Employee attendance kiosk |
 | http://localhost:8000/enroll?token=… | Single-use biometric enrolment page |
 | http://localhost:8000/docs | OpenAPI browser |
+| http://localhost:8000/api/health | Health check — also reports whether the frontend files were found |
+
+If a page returns **503** saying a frontend file was not found, the `frontend/`
+folder is missing from the checkout. `GET /api/health` names the exact
+directory that was searched; either restore the folder next to `backend/`, or
+set `FRONTEND_DIR` in `.env` to wherever it lives.
 
 The first boot seeds a demo restaurant (`REST001` — ABC Restaurant) with three
 employees, two shifts, a ₹30,000 salary structure and an admin login:

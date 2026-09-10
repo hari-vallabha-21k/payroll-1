@@ -8,6 +8,9 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./payroll.db"
 
+    # Where the static frontend lives; defaults to frontend/ beside backend/
+    frontend_dir: str | None = None
+
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480
