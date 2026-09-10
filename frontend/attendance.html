@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Employee Attendance</title>
+  <link rel="icon" href="/favicon.ico" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -69,11 +70,14 @@
           employee_code: employeeCode,
           tenant_code: tenantCode,
         });
-        if (!who.has_biometric) {
-          setStatus(
-            `${who.employee_name}: no biometric registered yet. Ask your manager for an enrolment link.`,
-            'bad'
-          );
+        // The server decides eligibility; an unverified employee never reaches
+        // the authenticator.
+        if (!who.can_authenticate) {
+          setStatus(`${who.employee_name}\n${who.blocked_reason || 'Attendance is not enabled.'}`, 'bad');
+          detail.textContent =
+            who.biometric_status === 'PENDING_VERIFICATION'
+              ? 'Your registration is waiting for HR approval.'
+              : '';
           return;
         }
 

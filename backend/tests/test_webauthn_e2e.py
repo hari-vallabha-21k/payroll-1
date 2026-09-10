@@ -98,15 +98,35 @@ def _api(path: str, payload: dict | None = None, token: str | None = None) -> di
     return json.loads(urlopen(request).read())
 
 
+EMPLOYEE_CODE = "EMPE2E"
+
+
 def test_enrol_then_check_in_and_out(browser_page, live_server):
     page = browser_page
     token = _api("/api/auth/login", {"email": "admin@abcrestaurant.in", "password": "admin12345"})[
         "access_token"
     ]
-    employees = _api("/api/webauthn/lookup", {"employee_code": "EMP001", "tenant_code": "REST001"})
-    assert employees["has_biometric"] is False
 
-    enrolment = _api("/api/webauthn/enrollment-token?employee_id=1", {}, token)
+    # A dedicated employee, so punches seeded by other tests cannot decide
+    # whether this one's first punch is a check-in or a check-out.
+    employee = _api(
+        "/api/employees",
+        {
+            "employee_code": EMPLOYEE_CODE,
+            "first_name": "Kiosk",
+            "last_name": "Tester",
+            "date_of_joining": "2026-01-01",
+        },
+        token,
+    )
+    employee_id = employee["id"]
+
+    lookup = _api(
+        "/api/webauthn/lookup", {"employee_code": EMPLOYEE_CODE, "tenant_code": "REST001"}
+    )
+    assert lookup["has_biometric"] is False
+
+    enrolment = _api(f"/api/webauthn/enrollment-token?employee_id={employee_id}", {}, token)
 
     # 1. Employee registers the phone from the single-use link.
     page.goto(enrolment["enroll_url"])
@@ -115,18 +135,34 @@ def test_enrol_then_check_in_and_out(browser_page, live_server):
     page.wait_for_function(SETTLED, timeout=20000)
     assert "Registered" in page.inner_text("#status")
 
-    # 2. Check in from the kiosk page.
+    # 2. Registration alone does not enable attendance.
+    pending = _api(
+        "/api/webauthn/lookup", {"employee_code": EMPLOYEE_CODE, "tenant_code": "REST001"}
+    )
+    assert pending["biometric_status"] == "PENDING_VERIFICATION"
+    assert pending["can_authenticate"] is False
+
+    # 3. HR verifies the registration.
+    verified = _api(
+        f"/api/employees/{employee_id}/biometric/verify",
+        {"reason": "Checked in person"},
+        token,
+    )
+    assert verified["biometric_status"] == "VERIFIED"
+    assert verified["attendance_enabled"] is True
+
+    # 4. Check in from the kiosk page.
     page.goto(f"{BASE}/attendance?tenant=REST001")
-    page.fill("#code", "EMP001")
+    page.fill("#code", EMPLOYEE_CODE)
     page.click("#verify")
     page.wait_for_function(SETTLED, timeout=20000)
     checked_in = page.inner_text("#status")
-    assert "Rahul Sharma" in checked_in
+    assert "Kiosk Tester" in checked_in
     assert "Checked in" in checked_in
 
-    # 3. Check out again.
+    # 5. Check out again.
     page.click("#reset")
-    page.fill("#code", "EMP001")
+    page.fill("#code", EMPLOYEE_CODE)
     page.click("#verify")
     page.wait_for_function(
         "document.getElementById('status').textContent.includes('Checked out') || "
@@ -135,9 +171,9 @@ def test_enrol_then_check_in_and_out(browser_page, live_server):
     )
     assert "Checked out" in page.inner_text("#status")
 
-    # 4. Both punches landed as standardized WebAuthn-sourced events.
+    # 6. Both punches landed as standardized WebAuthn-sourced events.
     request = Request(
-        f"{BASE}/api/attendance/events?employee_id=1",
+        f"{BASE}/api/attendance/events?employee_id={employee_id}",
         headers={"Authorization": f"Bearer {token}"},
     )
     import json
@@ -147,5 +183,5 @@ def test_enrol_then_check_in_and_out(browser_page, live_server):
     assert {event["event_type"] for event in from_kiosk} == {"CHECK_IN", "CHECK_OUT"}
 
     # And the enrolment link is single-use.
-    after = _api("/api/webauthn/lookup", {"employee_code": "EMP001", "tenant_code": "REST001"})
+    after = _api("/api/webauthn/lookup", {"employee_code": EMPLOYEE_CODE, "tenant_code": "REST001"})
     assert after["has_biometric"] is True

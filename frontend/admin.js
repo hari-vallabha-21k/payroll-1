@@ -1,6 +1,14 @@
 /* Admin console for the payroll prototype: plain fetch + DOM, no build step. */
 
-const state = { token: localStorage.getItem('token'), user: null, shifts: [], run: null };
+const state = {
+  token: localStorage.getItem('token'),
+  user: null,
+  shifts: [],
+  run: null,
+  ruleSet: null,
+  template: null,
+  templateData: null,
+};
 
 async function api(path, { method = 'GET', body, raw = false } = {}) {
   const headers = {};
@@ -100,7 +108,18 @@ async function startApp() {
     '<option value="">No shift</option>' +
     state.shifts.map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
 
-  await Promise.all([loadDashboard(), loadEmployees(), loadAttendance(), loadLeave(), loadRuns(), loadDevices()]);
+  $('rs-from').value = $('rule-from').value = $('tpl-from').value = today();
+
+  await Promise.all([
+    loadDashboard(),
+    loadEmployees(),
+    loadAttendance(),
+    loadLeave(),
+    loadRuns(),
+    loadDevices(),
+    loadRuleSets(),
+    loadTemplates(),
+  ]);
 }
 
 // --- dashboard -------------------------------------------------------------
@@ -140,10 +159,10 @@ async function loadEmployees() {
       <td>${e.full_name}</td>
       <td>${e.department ? e.department.name : '—'}</td>
       <td>${e.shift ? e.shift.name : '—'}</td>
-      <td>${e.has_biometric ? '✅ registered' : '—'}</td>
+      <td>${pill(e.biometric_status)}</td>
       <td>${pill(e.status)}</td>
       <td><button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
-            onclick="issueEnrollment(${e.id})">Enrolment link</button></td>
+            onclick="openBiometric(${e.id})">Biometric</button></td>
     </tr>`
   );
 }
@@ -459,7 +478,466 @@ $('pr-calc').addEventListener('click', calculatePayroll);
 $('pr-approve').addEventListener('click', approvePayroll);
 $('pr-slips').addEventListener('click', generatePayslips);
 $('d-save').addEventListener('click', addDevice);
+$('pr-preview').addEventListener('click', previewPayroll);
+$('rs-create').addEventListener('click', () => createRuleSet(false));
+$('rs-starter').addEventListener('click', () => createRuleSet(true));
+$('rule-save').addEventListener('click', saveRule);
+$('rule-formula').addEventListener('input', validateFormula);
+$('tpl-create').addEventListener('click', createTemplate);
+$('tpl-refresh').addEventListener('click', refreshTemplatePreview);
+$('tpl-pdf').addEventListener('click', previewTemplatePdf);
+$('tpl-save').addEventListener('click', saveTemplate);
+$('tpl-accent').addEventListener('change', refreshTemplatePreview);
 
 if (state.token) {
   startApp().catch(signOut);
+}
+
+
+// --- biometric authentication ---------------------------------------------
+async function openBiometric(employeeId) {
+  const panel = $('biometric-panel');
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  try {
+    const data = await api(`/api/employees/${employeeId}/biometric`);
+    renderBiometric(data);
+  } catch (err) {
+    $('biometric-body').innerHTML = `<div class="status bad">${err.message}</div>`;
+  }
+}
+
+function renderBiometric(data) {
+  const when = (value) => (value ? new Date(value + 'Z').toLocaleString() : '—');
+  const rows = data.credentials
+    .map(
+      (c) => `<tr>
+        <td>${c.device_name || c.device_label || 'Unnamed device'}</td>
+        <td>${pill(c.status)}</td>
+        <td>${when(c.created_at)}</td>
+        <td>${when(c.last_used_at)}</td>
+        <td>${c.status === 'ACTIVE'
+          ? `<button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
+               onclick="revokeCredential(${c.id}, ${data.employee_id})">Revoke</button>`
+          : ''}</td>
+      </tr>`
+    )
+    .join('');
+
+  const pending = data.biometric_status === 'PENDING_VERIFICATION';
+  const verified = data.biometric_status === 'VERIFIED';
+  const disabled = data.biometric_status === 'DISABLED';
+
+  $('biometric-body').innerHTML = `
+    <div class="grid" style="margin-bottom:14px">
+      <div class="stat"><div class="k">Employee</div><div class="n" style="font-size:16px">${data.employee_name}</div>
+        <div class="muted">${data.employee_code}</div></div>
+      <div class="stat"><div class="k">Biometric status</div><div style="margin-top:6px">${pill(data.biometric_status)}</div></div>
+      <div class="stat"><div class="k">Employment status</div><div style="margin-top:6px">${pill(data.employment_status)}</div></div>
+      <div class="stat"><div class="k">Attendance</div><div style="margin-top:6px">${
+        data.attendance_enabled ? '✅ enabled' : '⛔ blocked'
+      }</div></div>
+    </div>
+    <div class="grid" style="margin-bottom:14px">
+      <div class="stat"><div class="k">Authentication method</div><div>${data.authentication_method}</div></div>
+      <div class="stat"><div class="k">Registered on</div><div>${when(data.registered_on)}</div></div>
+      <div class="stat"><div class="k">Verified on</div><div>${when(data.verified_on)}</div></div>
+      <div class="stat"><div class="k">Last used</div><div>${when(data.last_used)}</div></div>
+    </div>
+    ${data.blocked_reason ? `<div class="alert">⚠ ${data.blocked_reason}</div>` : ''}
+    ${data.note ? `<p class="muted">Note: ${data.note}</p>` : ''}
+    <div class="row" style="margin:12px 0">
+      <button class="secondary" style="width:auto;margin:0"
+        onclick="issueEnrollment(${data.employee_id})">Register biometric</button>
+      ${pending ? `<button style="width:auto;margin:0"
+        onclick="biometricAction(${data.employee_id},'verify')">Verify</button>` : ''}
+      ${pending ? `<button class="secondary" style="width:auto;margin:0"
+        onclick="biometricAction(${data.employee_id},'reject')">Reject</button>` : ''}
+      ${verified ? `<button class="secondary" style="width:auto;margin:0"
+        onclick="biometricAction(${data.employee_id},'disable')">Disable</button>` : ''}
+      ${disabled ? `<button style="width:auto;margin:0"
+        onclick="biometricAction(${data.employee_id},'enable')">Re-enable</button>` : ''}
+    </div>
+    <h3 style="font-size:14px;margin:16px 0 6px">Credentials</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Device</th><th>Status</th><th>Registered</th><th>Last used</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="muted">No credentials registered.</td></tr>'}</tbody>
+    </table></div>`;
+}
+
+async function biometricAction(employeeId, action) {
+  const needsReason = action === 'reject' || action === 'disable';
+  const reason = needsReason
+    ? window.prompt(`Reason for ${action}:`, action === 'reject' ? 'Identity could not be confirmed' : 'Temporarily suspended')
+    : window.prompt('Note (optional):', 'Verified in person');
+  if (needsReason && !reason) return;
+  try {
+    const data = await api(`/api/employees/${employeeId}/biometric/${action}`, {
+      method: 'POST',
+      body: { reason: reason || null },
+    });
+    renderBiometric(data);
+    await loadEmployees();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function revokeCredential(credentialId, employeeId) {
+  if (!window.confirm('Revoke this device? The employee will need to register again.')) return;
+  try {
+    await api(`/api/webauthn/credentials/${credentialId}`, { method: 'DELETE' });
+    await openBiometric(employeeId);
+    await loadEmployees();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// --- payroll rules ---------------------------------------------------------
+async function loadRuleSets() {
+  const sets = await api('/api/payroll-rules/sets');
+  table(
+    $('rule-set-table'),
+    ['Name', 'Version', 'Effective from', 'Effective to', 'Active', ''],
+    sets,
+    (r) => `<tr>
+      <td>${r.name}</td>
+      <td>v${r.version}</td>
+      <td>${r.effective_from}</td>
+      <td>${r.effective_to || '—'}</td>
+      <td>${r.is_active ? '✅' : '—'}</td>
+      <td><button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
+            onclick="selectRuleSet(${r.id}, '${r.name.replace(/'/g, "\\'")}')">Open</button></td>
+    </tr>`
+  );
+  if (!state.ruleSet && sets.length) selectRuleSet(sets[0].id, sets[0].name);
+}
+
+async function selectRuleSet(id, name) {
+  state.ruleSet = id;
+  $('rule-set-label').textContent = `— ${name}`;
+  await Promise.all([loadRules(), loadVariables()]);
+}
+
+async function loadRules() {
+  if (!state.ruleSet) return;
+  const rules = await api(`/api/payroll-rules/sets/${state.ruleSet}/rules`);
+  table(
+    $('rule-table'),
+    ['Priority', 'Code', 'Name', 'Type', 'Formula', 'Effective', 'v', ''],
+    rules,
+    (r) => `<tr>
+      <td>${r.priority}</td>
+      <td><code>${r.code}</code></td>
+      <td>${r.name}</td>
+      <td>${pill(r.rule_type)}</td>
+      <td><code>${r.formula}</code></td>
+      <td>${r.effective_from}${r.effective_to ? ' → ' + r.effective_to : ''}</td>
+      <td>v${r.version}</td>
+      <td><button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
+            onclick="newRuleVersion(${r.id}, '${r.code}')">New version</button></td>
+    </tr>`
+  );
+}
+
+async function loadVariables() {
+  const variables = await api(
+    `/api/payroll-rules/variables${state.ruleSet ? '?rule_set_id=' + state.ruleSet : ''}`
+  );
+  $('variable-palette').innerHTML = variables
+    .map(
+      (v) => `<button class="secondary" title="${v.description}"
+        style="width:auto;margin:0;padding:5px 9px;font-size:12px"
+        onclick="insertVariable('${v.code}')">${v.code}</button>`
+    )
+    .join('');
+}
+
+function insertVariable(code) {
+  const input = $('rule-formula');
+  const at = input.selectionStart || input.value.length;
+  input.value = input.value.slice(0, at) + code + input.value.slice(at);
+  input.focus();
+  validateFormula();
+}
+
+let validateTimer = null;
+async function validateFormula() {
+  const status = $('rule-status');
+  const formula = $('rule-formula').value.trim();
+  if (!formula) {
+    status.classList.add('hidden');
+    return;
+  }
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(async () => {
+    status.classList.remove('hidden');
+    try {
+      const result = await api('/api/payroll-rules/validate', {
+        method: 'POST',
+        body: { formula, rule_set_id: state.ruleSet },
+      });
+      if (result.ok) {
+        show(status, 'ok', `Valid. Uses: ${result.variables_used.join(', ') || 'constants only'}`);
+      } else {
+        show(status, 'bad', result.error);
+      }
+    } catch (err) {
+      show(status, 'bad', err.message);
+    }
+  }, 250);
+}
+
+function ruleBody() {
+  return {
+    code: $('rule-code').value.trim().toUpperCase(),
+    name: $('rule-name').value.trim(),
+    rule_type: $('rule-type').value,
+    formula: $('rule-formula').value.trim(),
+    priority: Number($('rule-priority').value || 100),
+    effective_from: $('rule-from').value || today(),
+  };
+}
+
+async function saveRule() {
+  const status = $('rule-status');
+  status.classList.remove('hidden');
+  if (!state.ruleSet) {
+    show(status, 'bad', 'Create or open a rule set first.');
+    return;
+  }
+  try {
+    await api(`/api/payroll-rules/sets/${state.ruleSet}/rules`, { method: 'POST', body: ruleBody() });
+    show(status, 'ok', 'Rule saved.');
+    $('rule-code').value = $('rule-name').value = $('rule-formula').value = '';
+    await Promise.all([loadRules(), loadVariables()]);
+  } catch (err) {
+    show(status, 'bad', err.message);
+  }
+}
+
+async function newRuleVersion(ruleId, code) {
+  const formula = window.prompt(`New formula for ${code} (the current one is kept for past payroll):`);
+  if (!formula) return;
+  const from = window.prompt('Effective from (YYYY-MM-DD):', today());
+  if (!from) return;
+  try {
+    await api(`/api/payroll-rules/rules/${ruleId}/versions`, {
+      method: 'POST',
+      body: {
+        code,
+        name: code.replace(/_/g, ' '),
+        rule_type: 'EARNING',
+        formula,
+        effective_from: from,
+      },
+    });
+    await loadRules();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function createRuleSet(starter) {
+  const status = $('rs-status');
+  status.classList.remove('hidden');
+  const name = $('rs-name').value.trim() || 'Standard Payroll';
+  const from = $('rs-from').value || today();
+  try {
+    const created = starter
+      ? await api(
+          `/api/payroll-rules/sets/starter?effective_from=${from}&name=${encodeURIComponent(name)}`,
+          { method: 'POST' }
+        )
+      : await api('/api/payroll-rules/sets', {
+          method: 'POST',
+          body: { name, effective_from: from },
+        });
+    show(status, 'ok', `Rule set "${created.name}" created.`);
+    state.ruleSet = null;
+    await loadRuleSets();
+  } catch (err) {
+    show(status, 'bad', err.message);
+  }
+}
+
+// --- payroll preview -------------------------------------------------------
+async function previewPayroll() {
+  const period = selectedPeriod();
+  const panel = $('preview-panel');
+  panel.classList.remove('hidden');
+  $('preview-body').innerHTML = '<p class="muted">Calculating…</p>';
+  try {
+    const previews = await api(
+      `/api/payroll/preview?period_year=${period.period_year}&period_month=${period.period_month}`
+    );
+    $('preview-body').innerHTML = previews
+      .map((p) => {
+        const trace = p.trace
+          .map(
+            (line) => `<tr>
+              <td>${line.priority}</td>
+              <td><code>${line.code}</code></td>
+              <td>${line.type}</td>
+              <td class="n">${money(line.amount)}</td>
+              <td class="muted">${line.error ? '⚠ ' + line.error : line.explanation}</td>
+            </tr>`
+          )
+          .join('');
+        return `<div class="panel" style="background:#f8fafc">
+          <h3 style="margin:0 0 4px;font-size:15px">${p.employee_name} <span class="muted">${p.employee_code} · ${p.pay_period}</span></h3>
+          <p class="muted">Calculated by ${p.source === 'rules' ? 'payroll rules' : 'salary structure'}
+            ${p.rule_set_version ? '(rule set v' + p.rule_set_version + ')' : ''} ·
+            payable ${p.payable_days}/${p.total_days} days · LOP ${p.lop_days}</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Order</th><th>Component</th><th>Type</th><th>Amount</th><th>How it was calculated</th></tr></thead>
+            <tbody>${trace || '<tr><td colspan="5" class="muted">No rule set configured; the salary structure was used.</td></tr>'}</tbody>
+          </table></div>
+          <p style="margin-top:8px"><strong>Gross ${money(p.gross)}</strong> ·
+            Deductions ${money(p.total_deductions)} ·
+            <strong>Net ${money(p.net)}</strong></p>
+        </div>`;
+      })
+      .join('');
+  } catch (err) {
+    $('preview-body').innerHTML = `<div class="status bad">${err.message}</div>`;
+  }
+}
+
+// --- payslip templates -----------------------------------------------------
+async function loadTemplates() {
+  const templates = await api('/api/payslip-templates');
+  table(
+    $('template-table'),
+    ['Name', 'Version', 'Effective from', 'Effective to', 'Default', ''],
+    templates,
+    (t) => `<tr>
+      <td>${t.name}</td>
+      <td>v${t.version}</td>
+      <td>${t.effective_from}</td>
+      <td>${t.effective_to || '—'}</td>
+      <td>${t.is_default ? '✅' : '—'}</td>
+      <td><button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
+            onclick="openTemplate(${t.id})">Open</button></td>
+    </tr>`
+  );
+}
+
+async function openTemplate(id) {
+  const template = await api(`/api/payslip-templates/${id}`);
+  state.template = id;
+  state.templateData = JSON.parse(template.template_data);
+  renderSectionToggles();
+  await refreshTemplatePreview();
+}
+
+async function ensureTemplateData() {
+  if (!state.templateData) {
+    const definition = await api('/api/payslip-templates/default-definition');
+    state.templateData = definition.template_data;
+    renderSectionToggles();
+  }
+  return state.templateData;
+}
+
+function renderSectionToggles() {
+  const data = state.templateData;
+  if (!data) return;
+  $('section-toggles').innerHTML = data.sections
+    .map(
+      (section, index) => `<label style="font-weight:400;display:flex;gap:8px;align-items:center;margin:4px 0">
+        <input type="checkbox" style="width:auto" ${section.enabled !== false ? 'checked' : ''}
+          onchange="toggleSection(${index}, this.checked)" />
+        ${section.type.replace(/_/g, ' ')}
+      </label>`
+    )
+    .join('');
+  const accent = (data.page && data.page.accent) || '#1f2937';
+  $('tpl-accent').value = accent;
+  const title = data.sections.find((s) => s.type === 'title');
+  if (title) $('tpl-title').value = title.text || '';
+}
+
+function toggleSection(index, enabled) {
+  state.templateData.sections[index].enabled = enabled;
+  refreshTemplatePreview();
+}
+
+function applyBuilderInputs() {
+  const data = state.templateData;
+  data.page = data.page || {};
+  data.page.accent = $('tpl-accent').value;
+  const title = data.sections.find((s) => s.type === 'title');
+  if (title) title.text = $('tpl-title').value;
+  return data;
+}
+
+async function refreshTemplatePreview() {
+  await ensureTemplateData();
+  const data = applyBuilderInputs();
+  try {
+    const response = await fetch('/api/payslip-templates/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ template_data: data, format: 'html' }),
+    });
+    const html = await response.text();
+    if (!response.ok) throw new Error('Preview failed');
+    $('tpl-preview').srcdoc = html;
+  } catch (err) {
+    show($('tpl-build-status'), 'bad', err.message);
+    $('tpl-build-status').classList.remove('hidden');
+  }
+}
+
+async function previewTemplatePdf() {
+  await ensureTemplateData();
+  const data = applyBuilderInputs();
+  const response = await fetch('/api/payslip-templates/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ template_data: data, format: 'pdf' }),
+  });
+  const blob = await response.blob();
+  window.open(URL.createObjectURL(blob), '_blank');
+}
+
+async function createTemplate() {
+  const status = $('tpl-status');
+  status.classList.remove('hidden');
+  try {
+    const created = await api('/api/payslip-templates', {
+      method: 'POST',
+      body: {
+        name: $('tpl-name').value.trim() || 'Standard Payslip',
+        effective_from: $('tpl-from').value || today(),
+        is_default: $('tpl-default').value === 'true',
+      },
+    });
+    show(status, 'ok', `Template "${created.name}" created.`);
+    await loadTemplates();
+    await openTemplate(created.id);
+  } catch (err) {
+    show(status, 'bad', err.message);
+  }
+}
+
+async function saveTemplate() {
+  const status = $('tpl-build-status');
+  status.classList.remove('hidden');
+  if (!state.template) {
+    show(status, 'bad', 'Open a template first, or create one.');
+    return;
+  }
+  try {
+    await api(`/api/payslip-templates/${state.template}`, {
+      method: 'PUT',
+      body: { template_data: applyBuilderInputs() },
+    });
+    show(status, 'ok', 'Template saved. Payslips already issued keep their original design.');
+    await loadTemplates();
+  } catch (err) {
+    show(status, 'bad', err.message);
+  }
 }

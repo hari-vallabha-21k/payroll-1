@@ -19,7 +19,6 @@ from ..db import get_db
 from ..deps import client_ip, require_payroll
 from ..models import (
     Employee,
-    EmployeeStatus,
     EnrollmentToken,
     EventSource,
     Tenant,
@@ -38,6 +37,7 @@ from ..schemas import (
     WebAuthnRegisterOptionsRequest,
     WebAuthnRegisterVerify,
 )
+from ..services import biometric as biometric_service
 from ..services import punch as punch_service
 from ..services import webauthn_service
 from ..services.webauthn_service import WebAuthnError
@@ -59,10 +59,15 @@ def resolve_employee(db: Session, employee_code: str, tenant_code: str | None) -
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Employee code is ambiguous; a restaurant code is required"
         )
-    employee = employees[0]
-    if employee.status != EmployeeStatus.ACTIVE:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Employee is not active")
-    return employee
+    return employees[0]
+
+
+def require_attendance_eligible(db: Session, employee: Employee) -> None:
+    """Refuse before any ceremony starts, so an unverified employee never
+    reaches the authenticator."""
+    eligibility = biometric_service.check_attendance_eligibility(db, employee)
+    if not eligibility.allowed:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, eligibility.reason)
 
 
 def _naive_utcnow() -> datetime:
@@ -89,10 +94,14 @@ def resolve_token(db: Session, token: str) -> tuple[EnrollmentToken, Employee]:
 @router.post("/lookup", response_model=KioskEmployeeOut)
 def lookup(payload: WebAuthnOptionsRequest, db: Session = Depends(get_db)):
     employee = resolve_employee(db, payload.employee_code, payload.tenant_code)
+    eligibility = biometric_service.check_attendance_eligibility(db, employee)
     return KioskEmployeeOut(
         employee_code=employee.employee_code,
         employee_name=employee.full_name,
         has_biometric=bool(webauthn_service.credentials_for(db, employee)),
+        biometric_status=employee.biometric_status,
+        can_authenticate=eligibility.allowed,
+        blocked_reason=eligibility.reason,
         next_action=punch_service.next_event_type(db, employee),
     )
 
@@ -164,14 +173,18 @@ def register_verify(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     token.used_at = utcnow()
+    biometric_service.mark_registered(db, employee)
     audit.record(
         db,
         tenant_id=employee.tenant_id,
-        action="REGISTER_WEBAUTHN_CREDENTIAL",
+        action="BIOMETRIC_REGISTERED",
         entity_type="employee",
         entity_id=employee.id,
         actor=employee.employee_code,
-        detail={"credential_id": credential.credential_id},
+        detail={
+            "credential_id": credential.credential_id,
+            "biometric_status": employee.biometric_status.value,
+        },
         ip_address=client_ip(request),
     )
     db.commit()
@@ -183,6 +196,7 @@ def register_verify(
 @router.post("/authenticate/options")
 def authenticate_options(payload: WebAuthnOptionsRequest, db: Session = Depends(get_db)):
     employee = resolve_employee(db, payload.employee_code, payload.tenant_code)
+    require_attendance_eligible(db, employee)
     try:
         return webauthn_service.authentication_options(db, employee)
     except WebAuthnError as exc:
@@ -194,6 +208,7 @@ def authenticate_verify(
     payload: WebAuthnAuthVerify, request: Request, db: Session = Depends(get_db)
 ):
     employee = resolve_employee(db, payload.employee_code, payload.tenant_code)
+    require_attendance_eligible(db, employee)
     try:
         credential = webauthn_service.verify_authentication(db, employee, payload.credential)
     except WebAuthnError as exc:
@@ -261,15 +276,20 @@ def revoke_credential(
     ).scalar_one_or_none()
     if credential is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Credential not found")
-    credential.is_active = False
+    biometric_service.revoke_credential(db, credential)
+    employee = db.get(Employee, credential.employee_id)
     audit.record(
         db,
         tenant_id=user.tenant_id,
         user_id=user.id,
         actor=user.email,
-        action="REVOKE_WEBAUTHN_CREDENTIAL",
+        action="BIOMETRIC_CREDENTIAL_REVOKED",
         entity_type="webauthn_credential",
         entity_id=credential.id,
+        detail={
+            "employee_id": credential.employee_id,
+            "biometric_status": employee.biometric_status.value if employee else None,
+        },
     )
     db.commit()
     return {"detail": "Credential revoked"}

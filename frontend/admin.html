@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Payroll Admin</title>
+  <link rel="icon" href="/favicon.ico" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -37,6 +38,8 @@
         <button data-tab="attendance">Attendance</button>
         <button data-tab="leave">Leave</button>
         <button data-tab="payroll">Payroll</button>
+        <button data-tab="rules">Payroll Rules</button>
+        <button data-tab="templates">Payslip Templates</button>
         <button data-tab="devices">Devices</button>
       </nav>
 
@@ -71,6 +74,11 @@
         <div class="panel">
           <h2>Employees</h2>
           <div class="table-wrap"><table id="employee-table"></table></div>
+        </div>
+
+        <div class="panel hidden" id="biometric-panel">
+          <h2>Employee Profile &rsaquo; Biometric Authentication</h2>
+          <div id="biometric-body"></div>
         </div>
       </section>
 
@@ -110,6 +118,7 @@
           <h2>Run payroll</h2>
           <div class="row">
             <div><label>Month</label><input id="pr-month" type="month" /></div>
+            <button id="pr-preview" class="secondary">Preview</button>
             <button id="pr-calc">Calculate</button>
             <button id="pr-approve" class="secondary">Approve</button>
             <button id="pr-slips" class="secondary">Generate payslips</button>
@@ -117,9 +126,100 @@
           <div class="status hidden" id="pr-status"></div>
           <div class="table-wrap" style="margin-top:12px"><table id="payroll-table"></table></div>
         </div>
+        <div class="panel hidden" id="preview-panel">
+          <h2>Payroll preview <span class="muted">— nothing is saved</span></h2>
+          <div id="preview-body"></div>
+        </div>
         <div class="panel">
           <h2>Payroll runs</h2>
           <div class="table-wrap"><table id="runs-table"></table></div>
+        </div>
+      </section>
+
+      <section id="tab-rules" class="tab hidden">
+        <div class="panel">
+          <h2>Payroll rule sets</h2>
+          <p class="muted">
+            Rules decide how salary is calculated for this company. Without a rule
+            set, payroll falls back to the built-in salary-structure calculation.
+          </p>
+          <div class="row">
+            <div><label>Set name</label><input id="rs-name" placeholder="Standard Payroll" /></div>
+            <div><label>Effective from</label><input id="rs-from" type="date" /></div>
+            <button id="rs-starter" class="secondary">Create starter set</button>
+            <button id="rs-create">Create empty set</button>
+          </div>
+          <div class="status hidden" id="rs-status"></div>
+          <div class="table-wrap" style="margin-top:12px"><table id="rule-set-table"></table></div>
+        </div>
+
+        <div class="panel">
+          <h2>Rules <span class="muted" id="rule-set-label">— select a rule set</span></h2>
+          <div class="table-wrap"><table id="rule-table"></table></div>
+        </div>
+
+        <div class="panel">
+          <h2>Create payroll rule</h2>
+          <div class="row">
+            <div><label>Code</label><input id="rule-code" placeholder="HRA" /></div>
+            <div><label>Name</label><input id="rule-name" placeholder="House Rent Allowance" /></div>
+            <div><label>Type</label><select id="rule-type">
+              <option>EARNING</option><option>DEDUCTION</option><option>INTERMEDIATE</option>
+            </select></div>
+            <div><label>Priority</label><input id="rule-priority" type="number" value="100" /></div>
+            <div><label>Effective from</label><input id="rule-from" type="date" /></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div style="flex:3 1 320px">
+              <label>Formula</label>
+              <input id="rule-formula" placeholder="BASIC * 0.40" />
+            </div>
+            <button id="rule-save">Save rule</button>
+          </div>
+          <div class="status hidden" id="rule-status"></div>
+          <p class="muted" style="margin-top:10px">Click a variable to insert it:</p>
+          <div id="variable-palette" class="row" style="gap:6px"></div>
+        </div>
+      </section>
+
+      <section id="tab-templates" class="tab hidden">
+        <div class="panel">
+          <h2>Payslip templates</h2>
+          <p class="muted">
+            Templates control appearance only. Editing one never changes a salary
+            figure, and never alters payslips that were already issued.
+          </p>
+          <div class="row">
+            <div><label>Template name</label><input id="tpl-name" placeholder="Restaurant Staff Payslip" /></div>
+            <div><label>Effective from</label><input id="tpl-from" type="date" /></div>
+            <div><label>Default</label><select id="tpl-default"><option value="true">Yes</option><option value="false">No</option></select></div>
+            <button id="tpl-create">Create from default</button>
+          </div>
+          <div class="status hidden" id="tpl-status"></div>
+          <div class="table-wrap" style="margin-top:12px"><table id="template-table"></table></div>
+        </div>
+
+        <div class="panel">
+          <h2>Template builder</h2>
+          <div class="row">
+            <div style="flex:1 1 240px">
+              <label>Sections</label>
+              <div id="section-toggles"></div>
+              <label style="margin-top:10px">Accent colour</label>
+              <input id="tpl-accent" type="color" value="#1f2937" />
+              <label style="margin-top:10px">Title</label>
+              <input id="tpl-title" value="Salary Slip — {{pay_period}}" />
+              <button id="tpl-refresh" class="secondary">Refresh preview</button>
+              <button id="tpl-pdf" class="secondary">Preview PDF</button>
+              <button id="tpl-save">Save to selected template</button>
+            </div>
+            <div style="flex:2 1 380px">
+              <label>Preview</label>
+              <iframe id="tpl-preview" title="Payslip preview"
+                style="width:100%;height:620px;border:1px solid var(--line);border-radius:10px;background:#fff"></iframe>
+            </div>
+          </div>
+          <div class="status hidden" id="tpl-build-status"></div>
         </div>
       </section>
 

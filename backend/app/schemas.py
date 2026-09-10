@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from .models import (
     AttendanceStatus,
+    BiometricStatus,
     ComponentType,
+    CredentialStatus,
     DeviceStatus,
     EmployeeStatus,
     EmploymentType,
@@ -17,6 +19,7 @@ from .models import (
     LeaveStatus,
     PayrollStatus,
     Role,
+    RuleType,
 )
 
 
@@ -142,6 +145,7 @@ class EmployeeOut(ORMModel):
     date_of_joining: date
     employment_type: EmploymentType
     status: EmployeeStatus
+    biometric_status: BiometricStatus = BiometricStatus.NOT_REGISTERED
     department: NamedOut | None = None
     designation: NamedOut | None = None
     shift: ShiftOut | None = None
@@ -186,6 +190,9 @@ class KioskEmployeeOut(BaseModel):
     employee_code: str
     employee_name: str
     has_biometric: bool
+    biometric_status: BiometricStatus
+    can_authenticate: bool
+    blocked_reason: str | None = None
     next_action: EventType
 
 
@@ -194,9 +201,34 @@ class CredentialOut(ORMModel):
     employee_id: int
     credential_id: str
     device_label: str | None
+    device_name: str | None = None
+    status: CredentialStatus
     created_at: datetime
     last_used_at: datetime | None
+    revoked_at: datetime | None = None
     is_active: bool
+
+
+class BiometricDecision(BaseModel):
+    reason: str | None = None
+
+
+class BiometricPanelOut(BaseModel):
+    """Everything the Employee Profile -> Biometric Authentication panel shows."""
+
+    employee_id: int
+    employee_code: str
+    employee_name: str
+    employment_status: EmployeeStatus
+    biometric_status: BiometricStatus
+    authentication_method: str
+    registered_on: datetime | None
+    verified_on: datetime | None
+    last_used: datetime | None
+    note: str | None
+    attendance_enabled: bool
+    blocked_reason: str | None
+    credentials: list[CredentialOut] = []
 
 
 # --- attendance -------------------------------------------------------------
@@ -457,3 +489,154 @@ class DashboardOut(BaseModel):
 
 TokenResponse.model_rebuild()
 PunchResult.model_rebuild()
+
+
+# --- payroll rules ----------------------------------------------------------
+class VariableOut(BaseModel):
+    code: str
+    label: str
+    description: str
+    kind: str
+
+
+class FormulaValidationRequest(BaseModel):
+    formula: str
+    rule_set_id: int | None = None
+
+
+class FormulaValidationResult(BaseModel):
+    ok: bool
+    error: str | None = None
+    variables_used: list[str] = []
+    functions_used: list[str] = []
+
+
+class PayrollRuleSetCreate(BaseModel):
+    name: str
+    description: str | None = None
+    effective_from: date
+    effective_to: date | None = None
+
+
+class PayrollRuleSetOut(ORMModel):
+    id: int
+    tenant_id: int
+    name: str
+    description: str | None
+    version: int
+    effective_from: date
+    effective_to: date | None
+    is_active: bool
+    created_at: datetime
+
+
+class PayrollRuleCreate(BaseModel):
+    code: str = Field(pattern=r"^[A-Z][A-Z0-9_]{1,47}$")
+    name: str
+    rule_type: RuleType
+    formula: str
+    priority: int = 100
+    show_on_payslip: bool = True
+    show_if_zero: bool = False
+    effective_from: date
+    effective_to: date | None = None
+
+
+class PayrollRuleUpdate(BaseModel):
+    name: str | None = None
+    formula: str | None = None
+    priority: int | None = None
+    show_on_payslip: bool | None = None
+    show_if_zero: bool | None = None
+    effective_to: date | None = None
+    is_active: bool | None = None
+
+
+class PayrollRuleOut(ORMModel):
+    id: int
+    rule_set_id: int
+    code: str
+    name: str
+    rule_type: RuleType
+    formula: str
+    priority: int
+    show_on_payslip: bool
+    show_if_zero: bool
+    effective_from: date
+    effective_to: date | None
+    version: int
+    is_active: bool
+
+
+class PayrollPreviewLine(BaseModel):
+    code: str
+    label: str
+    type: str
+    priority: int
+    formula: str
+    amount: Decimal
+    explanation: str
+    error: str | None = None
+
+
+class PayrollPreviewOut(BaseModel):
+    """What the preview screen shows before payroll is finalised."""
+
+    employee_id: int
+    employee_code: str
+    employee_name: str
+    pay_period: str
+    source: str
+    rule_set_id: int | None = None
+    rule_set_version: int | None = None
+    total_days: int
+    working_days: float
+    payable_days: float
+    lop_days: float
+    paid_leave_days: float
+    overtime_minutes: int
+    earnings: list[dict] = []
+    deductions: list[dict] = []
+    gross: Decimal
+    total_deductions: Decimal
+    net: Decimal
+    trace: list[PayrollPreviewLine] = []
+
+
+# --- payslip templates ------------------------------------------------------
+class PayslipTemplateCreate(BaseModel):
+    name: str
+    template_data: dict[str, Any] | None = None
+    effective_from: date
+    effective_to: date | None = None
+    is_default: bool = False
+
+
+class PayslipTemplateUpdate(BaseModel):
+    name: str | None = None
+    template_data: dict[str, Any] | None = None
+    effective_to: date | None = None
+    is_default: bool | None = None
+    is_active: bool | None = None
+
+
+class PayslipTemplateOut(ORMModel):
+    id: int
+    tenant_id: int
+    name: str
+    template_data: str
+    version: int
+    effective_from: date
+    effective_to: date | None
+    is_default: bool
+    is_active: bool
+    created_at: datetime
+
+
+class PayslipTemplatePreviewRequest(BaseModel):
+    """Preview an unsaved definition, a stored template, or a real payslip."""
+
+    template_id: int | None = None
+    template_data: dict[str, Any] | None = None
+    payslip_id: int | None = None
+    format: str = Field(default="html", pattern="^(html|pdf)$")

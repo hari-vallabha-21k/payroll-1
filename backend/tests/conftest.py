@@ -16,13 +16,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from backend.app.db import Base, SessionLocal, engine  # noqa: E402
 from backend.app.main import app  # noqa: E402
+from backend.app.migrate import upgrade_database  # noqa: E402
 from backend.app.seed import seed  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _schema():
     Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    # Build the schema through the migrations, so every run exercises them.
+    upgrade_database(engine)
     with SessionLocal() as db:
         seed(db)
     yield

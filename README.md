@@ -10,6 +10,17 @@ records, WebAuthn attendance, shifts, leave, overtime, salary structures,
 payroll runs, payslips (PDF), reports, device integration and audit logging —
 multi-tenant from the first table.
 
+Three engines are kept deliberately independent, so a client can differ in one
+without disturbing the others:
+
+```
+ATTENDANCE ENGINE   biometric → authentication → standardized events
+        ↓
+PAYROLL ENGINE      rules → calculation → payroll result
+        ↓
+PAYSLIP ENGINE      payroll result → template → HTML / PDF
+```
+
 ---
 
 ## Quick start
@@ -80,10 +91,13 @@ Set `SEED_DEMO_DATA=false` for a clean database.
 CI runs these on Python 3.10, 3.11 and 3.12, so a version-specific construct
 cannot land unnoticed.
 
-25 tests: the attendance rules (against the worked examples in the brief), the
-payroll engine, the REST API end to end, and a **real browser WebAuthn
-ceremony** driven through Chromium's virtual authenticator — enrolment,
-check-in and check-out. The browser test skips itself when Playwright or
+109 tests: the attendance rules (against the worked examples in the brief), the
+payroll engine, the REST API end to end, the biometric lifecycle and its access
+control, formula safety and evaluation, rule priority and versioning, template
+rendering and version pinning, migrations from a pre-Alembic database, tenant
+isolation and RBAC, and a **real browser WebAuthn ceremony** driven through
+Chromium's virtual authenticator — enrolment, HR verification, check-in and
+check-out. The browser test skips itself when Playwright or
 Chromium is unavailable.
 
 ---
@@ -136,6 +150,26 @@ employee_id · event_time · event_type · source · device_id
 — so WebAuthn, a mock device and a real ZKTeco machine are interchangeable from
 the payroll engine's point of view.
 
+### Biometric verification
+
+Biometric status is tracked separately from employment status, and attendance
+needs both gates open:
+
+```
+NOT_REGISTERED → PENDING_VERIFICATION → VERIFIED → DISABLED
+                        ↓ (rejected)                  ↓ (re-enabled)
+                  NOT_REGISTERED                   VERIFIED
+```
+
+A new employee starts ACTIVE but NOT_REGISTERED. Registering a device moves
+them to PENDING_VERIFICATION — **registration alone never enables attendance**.
+An admin or HR user verifies, and only then does the kiosk let the employee
+authenticate. An unverified employee is refused before any WebAuthn challenge
+is issued, so their device is never even prompted.
+
+Managed at **Employees → (employee) → Biometric**, or via
+`/api/employees/{id}/biometric`.
+
 ### Raw vs processed attendance
 
 `attendance_events` rows are **never edited**. `daily_attendance` is derived
@@ -151,19 +185,80 @@ An HR correction sets `is_manual_override` on the processed row, so
 reprocessing leaves it alone until the override is explicitly cleared. Both the
 correction and the clearing are written to `audit_logs`.
 
-### Payroll
+### Payroll rules
 
-Attendance + leave + overtime + salary structure → gross → deductions → net.
+Payroll is configuration, not code. A tenant's rule set defines the components,
+their formulas and the order they run in, so a different restaurant can pay
+differently without a source change. A tenant with no rule set falls back to
+the original salary-structure calculation, so existing installations are
+unaffected until they opt in.
 
-Earnings are paid in full and unpaid days come off as an explicit **Loss of
-Pay** line, so a payslip shows *why* the net differs from the gross rather than
-silently pro-rating each component. Overtime minutes come from processed
-attendance and are paid at the employee's (or the structure's) hourly rate.
+```
+Employee → Salary Structure → Attendance → Payroll Rules → Engine → Result
+```
+
+Formulas are parsed into an AST and walked against a whitelist — no `eval`, no
+imports, no attribute access, no calls beyond `MIN`, `MAX`, `ROUND`, `ABS`,
+`IF`, `FLOOR`, `CEIL`. They are validated when saved, not when payroll runs.
+
+```
+HRA        = BASIC * 0.40              priority 20
+OVERTIME   = OT_HOURS * OT_RATE        priority 40
+PF         = MIN(BASIC * 0.12, 1800)   priority 60
+LOP        = LOP_DAYS * DAILY_SALARY   priority 75
+```
+
+Rules execute in priority order and each result is fed back into scope, so
+later rules build on earlier ones. `GROSS`, `TOTAL_DEDUCTIONS` and `NET` update
+as the run proceeds. A rule that fails is reported on the preview and audit
+trail rather than aborting the run.
+
+Rules are versioned by effective date. Superseding a rule closes the previous
+version the day before the new one starts, so **payroll already run keeps the
+formula it was run with** — changing a rule never recalculates history.
+
+**Preview** (`GET /api/payroll/preview`) calculates without saving and shows
+how every figure was reached:
+
+```
+ 20 HRA   EARNING   7200.00   BASIC * 0.40  (with BASIC = 18000.00)
+ 75 LOP   DEDUCTION 1000.00   LOP_DAYS * DAILY_SALARY  (with LOP_DAYS = 1, DAILY_SALARY = 1000)
+```
+
+Manual adjustments are included in the run and written to the audit log — never
+applied silently.
+
+### The built-in payroll fallback
+
+Without rules, earnings are paid in full and unpaid days come off as an
+explicit **Loss of Pay** line, so a payslip shows *why* the net differs from
+the gross rather than silently pro-rating each component. Overtime minutes come
+from processed attendance and are paid at the employee's hourly rate.
 
 A run moves `DRAFT → CALCULATED → UNDER_REVIEW → APPROVED → PROCESSED`.
 Approved payroll cannot be recalculated — an admin must `reopen` it with a
 reason, which is audited. Payslips are only issued from approved runs and are
 stored as an immutable JSON snapshot, rendered to PDF on demand.
+
+### Payslip templates
+
+Templates are presentation only: editing one can never move a salary figure,
+and changing a formula never touches a template.
+
+A template is an ordered list of sections (company header, employee details,
+attendance, earnings/deductions, summary, footer) whose text fields accept
+`{{placeholders}}`. Earnings and deductions render from whatever components the
+employee actually has — no empty HRA row for someone without HRA, unless the
+template asks for one.
+
+Templates are versioned, and **every payslip stores the template it was issued
+with**. Redesigning a template leaves issued payslips exactly as they were;
+so do changes to salary, rules, designation or company details. Moving an old
+payslip onto the current design is a deliberate, audited action
+(`POST /api/payslips/{id}/regenerate?use_current_template=true`).
+
+Built at **Settings → Payroll → Payslip Templates**, with a live preview in
+HTML and PDF before saving.
 
 ### Device integration
 
@@ -222,10 +317,26 @@ GET/POST /api/shifts   /api/holidays   /api/leave-types   /api/leave-requests
 POST   /api/leave-requests/{id}/decision
 GET/POST /api/salary-structures        /api/employees/{id}/salary
 
+GET    /api/employees/{id}/biometric
+POST   /api/employees/{id}/biometric/verify | /reject | /disable | /enable
+GET    /api/employees/biometric/pending
+
+GET    /api/payroll-rules/variables | /functions
+POST   /api/payroll-rules/validate
+GET/POST /api/payroll-rules/sets       POST /api/payroll-rules/sets/starter
+GET/POST /api/payroll-rules/sets/{id}/rules
+PUT    /api/payroll-rules/rules/{id}   POST /api/payroll-rules/rules/{id}/versions
+
+GET/POST /api/payslip-templates        GET /api/payslip-templates/default-definition
+PUT    /api/payslip-templates/{id}     POST /api/payslip-templates/{id}/versions
+POST   /api/payslip-templates/preview
+
+GET    /api/payroll/preview
 POST   /api/payroll/calculate
 GET    /api/payroll   /api/payroll/{id}   /api/payroll/{id}/items/{employee_id}
 POST   /api/payroll/{id}/adjustments | /review | /approve | /reopen | /process | /payslips
-GET    /api/payslips   /api/payslips/{id}/pdf
+GET    /api/payslips   /api/payslips/{id}/pdf   /api/payslips/{id}/html
+POST   /api/payslips/{id}/regenerate
 
 GET/POST /api/devices            PUT  /api/devices/{id}
 POST   /api/devices/{id}/enrollments
@@ -251,13 +362,28 @@ GET    /api/audit-logs  /api/settings   PUT /api/settings/{key}
   shown once at registration) rather than staff credentials.
 * The unauthenticated kiosk endpoints are rate limited per IP.
 * Payroll approval, reopening, salary changes, attendance corrections, manual
-  punches, leave decisions and credential revocation are all written to
-  `audit_logs` with the actor and the before/after detail.
+  punches, leave decisions, biometric verification/rejection/disabling,
+  credential revocation, payroll-rule and payslip-template changes are all
+  written to `audit_logs` with the actor and the before/after detail.
 
 Known limits of the prototype, worth closing before production: the rate
-limiter is in-process (move it to Redis or the edge), sessions are stateless
-JWTs with no revocation list, and `Base.metadata.create_all` stands in for
-migrations — add Alembic before the schema has real data in it.
+limiter is in-process (move it to Redis or the edge), and sessions are
+stateless JWTs with no revocation list.
+
+## Database migrations
+
+The schema is owned by Alembic and upgraded automatically at startup.
+
+A database created by the older `create_all` startup is **stamped** at the
+baseline revision and then upgraded, never rebuilt, so live data survives. The
+upgrade also backfills: an employee who already held an active credential is
+marked `VERIFIED`, because they were checking in before the verification
+workflow existed and must not be locked out by the upgrade.
+
+```bash
+.venv/bin/alembic current      # where this database stands
+.venv/bin/alembic upgrade head # apply by hand, if you prefer
+```
 
 ---
 
@@ -273,13 +399,19 @@ backend/app/
   audit.py           audit-log helper
   ratelimit.py       kiosk rate limiting
   seed.py            demo restaurant
+  migrate.py         Alembic runner, stamps pre-Alembic databases
   services/
     attendance.py    raw events → processed daily attendance
     punch.py         recording a standardized event from any source
-    payroll.py       the payroll engine
+    biometric.py     biometric lifecycle and the attendance gate
+    formula.py       safe formula parsing and evaluation
+    payroll_rules.py rule resolution, ordering and execution
+    payroll.py       the payroll engine (rules, with structure fallback)
     payslip.py       snapshot + PDF rendering
+    payslip_template.py   template rendering, variables, amount-in-words
     webauthn_service.py   registration and authentication ceremonies
   routers/           one module per API area
+backend/migrations/  Alembic revisions
 backend/tests/       unit, API and browser end-to-end tests
 frontend/            admin console, attendance kiosk, enrolment page
 connector/           reference biometric-device connector

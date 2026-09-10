@@ -22,6 +22,7 @@ from ..models import (
 from ..schemas import (
     AdjustmentCreate,
     PayrollItemOut,
+    PayrollPreviewOut,
     PayrollRunCreate,
     PayrollRunDetail,
     PayrollRunOut,
@@ -125,6 +126,76 @@ def calculate(
     db.commit()
     db.refresh(run)
     return run
+
+
+@router.get("/payroll/preview", response_model=list[PayrollPreviewOut])
+def preview(
+    period_year: int,
+    period_month: int,
+    employee_id: int | None = None,
+    user: User = Depends(require_payroll),
+    db: Session = Depends(get_db),
+):
+    """Calculate without persisting, showing how every amount was reached.
+
+    Nothing is written, so HR can inspect and correct the inputs before a run
+    is created.
+    """
+    import calendar
+
+    from ..models import EmployeeStatus
+
+    stmt = select(Employee).where(
+        Employee.tenant_id == user.tenant_id, Employee.status == EmployeeStatus.ACTIVE
+    )
+    if employee_id:
+        stmt = stmt.where(Employee.id == employee_id)
+    employees = list(db.execute(stmt.order_by(Employee.employee_code)).scalars())
+    if employee_id and not employees:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+
+    existing_run = db.execute(
+        select(PayrollRun).where(
+            PayrollRun.tenant_id == user.tenant_id,
+            PayrollRun.period_year == period_year,
+            PayrollRun.period_month == period_month,
+        )
+    ).scalar_one_or_none()
+
+    previews = []
+    for employee in employees:
+        result = payroll_service.calculate_employee(
+            db,
+            employee,
+            period_year,
+            period_month,
+            run_id=existing_run.id if existing_run else None,
+        )
+        data = result.to_dict()
+        previews.append(
+            PayrollPreviewOut(
+                employee_id=employee.id,
+                employee_code=employee.employee_code,
+                employee_name=employee.full_name,
+                pay_period=f"{calendar.month_name[period_month]} {period_year}",
+                source=result.source,
+                rule_set_id=result.rule_set_id,
+                rule_set_version=result.rule_set_version,
+                total_days=result.total_days,
+                working_days=result.working_days,
+                payable_days=result.payable_days,
+                lop_days=result.lop_days,
+                paid_leave_days=result.paid_leave_days,
+                overtime_minutes=result.overtime_minutes,
+                earnings=data["earnings"],
+                deductions=data["deductions"],
+                gross=result.gross,
+                total_deductions=result.deduction_total,
+                net=result.net,
+                trace=result.trace,
+            )
+        )
+    return previews
 
 
 @router.get("/payroll/{run_id}", response_model=PayrollRunDetail)
@@ -298,6 +369,16 @@ def generate_payslips(
         )
     tenant = db.get(Tenant, run.tenant_id)
 
+    from ..services import payslip_template as template_service
+    from .payslip_templates import active_template
+
+    period_end = payroll_service.month_bounds(run.period_year, run.period_month)[1]
+    template = active_template(db, run.tenant_id, period_end)
+    template_data = (
+        json.loads(template.template_data) if template else template_service.DEFAULT_TEMPLATE
+    )
+    template_snapshot = template_service.dumps(template_data)
+
     created = 0
     for item in run.items:
         existing = db.execute(
@@ -316,20 +397,34 @@ def generate_payslips(
                         f"{employee.employee_code}"
                     ),
                     snapshot_json=json.dumps(snapshot),
+                    # Pinned at generation: editing the template later cannot
+                    # change how this payslip looks.
+                    template_id=template.id if template else None,
+                    template_version=template.version if template else None,
+                    template_snapshot_json=template_snapshot,
+                    gross_salary=item.gross,
+                    total_deductions=item.deductions,
+                    net_salary=item.net,
                 )
             )
             created += 1
         else:
+            # An existing payslip keeps its original template and figures; only
+            # an explicit regenerate replaces them.
             existing.snapshot_json = json.dumps(snapshot)
     audit.record(
         db,
         tenant_id=user.tenant_id,
         user_id=user.id,
         actor=user.email,
-        action="GENERATE_PAYSLIPS",
+        action="PAYSLIP_GENERATED",
         entity_type="payroll_run",
         entity_id=run.id,
-        detail={"created": created},
+        detail={
+            "created": created,
+            "template_id": template.id if template else None,
+            "template_version": template.version if template else None,
+        },
     )
     db.commit()
     return {"detail": "Payslips generated", "created": created, "total": len(run.items)}
@@ -357,10 +452,86 @@ def list_payslips(
             "employee_id": p.employee_id,
             "payslip_number": p.payslip_number,
             "generated_at": p.generated_at,
+            "template_id": p.template_id,
+            "template_version": p.template_version,
             "snapshot": json.loads(p.snapshot_json),
         }
         for p in payslips
     ]
+
+
+@router.get("/payslips/{payslip_id}/html", response_class=Response)
+def view_payslip(
+    payslip_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """The payslip as it was issued, rendered from its captured template."""
+    payslip = db.execute(
+        select(Payslip).where(Payslip.id == payslip_id, Payslip.tenant_id == user.tenant_id)
+    ).scalar_one_or_none()
+    if payslip is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payslip not found")
+    employee = get_employee_or_404(db, user.tenant_id, payslip.employee_id)
+    assert_can_view_employee(db, user, employee)
+    return Response(content=payslip_service.render_html(payslip), media_type="text/html")
+
+
+@router.post("/payslips/{payslip_id}/regenerate")
+def regenerate_payslip(
+    payslip_id: int,
+    use_current_template: bool = False,
+    user: User = Depends(require_payroll),
+    db: Session = Depends(get_db),
+):
+    """Re-issue a payslip.
+
+    By default this only refreshes the rendering from the same captured
+    template. Moving it onto the current template is deliberate and audited,
+    never a side effect of editing a template.
+    """
+    payslip = db.execute(
+        select(Payslip).where(Payslip.id == payslip_id, Payslip.tenant_id == user.tenant_id)
+    ).scalar_one_or_none()
+    if payslip is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payslip not found")
+
+    previous_version = payslip.template_version
+    if use_current_template:
+        from ..services import payslip_template as template_service
+        from .payslip_templates import active_template
+
+        run = get_run_or_404(db, user.tenant_id, payslip.run_id)
+        period_end = payroll_service.month_bounds(run.period_year, run.period_month)[1]
+        template = active_template(db, user.tenant_id, period_end)
+        template_data = (
+            json.loads(template.template_data) if template else template_service.DEFAULT_TEMPLATE
+        )
+        payslip.template_id = template.id if template else None
+        payslip.template_version = template.version if template else None
+        payslip.template_snapshot_json = template_service.dumps(template_data)
+
+    payslip.regenerated_at = utcnow()
+    audit.record(
+        db,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        actor=user.email,
+        action="PAYSLIP_REGENERATED",
+        entity_type="payslip",
+        entity_id=payslip.id,
+        detail={
+            "employee_id": payslip.employee_id,
+            "template_moved": use_current_template,
+            "from_template_version": previous_version,
+            "to_template_version": payslip.template_version,
+        },
+    )
+    db.commit()
+    db.refresh(payslip)
+    return {
+        "detail": "Payslip regenerated",
+        "template_version": payslip.template_version,
+        "figures_unchanged": True,
+    }
 
 
 @router.get("/payslips/{payslip_id}/pdf")

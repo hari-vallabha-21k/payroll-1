@@ -47,9 +47,35 @@ class EmploymentType(str, enum.Enum):
 
 
 class EmployeeStatus(str, enum.Enum):
+    ONBOARDING = "ONBOARDING"
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
     TERMINATED = "TERMINATED"
+
+
+class BiometricStatus(str, enum.Enum):
+    """Tracked independently of employment status.
+
+    An ACTIVE employee may still be NOT_REGISTERED, and a verified employee
+    who leaves keeps the record of what was verified.
+    """
+
+    NOT_REGISTERED = "NOT_REGISTERED"
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    VERIFIED = "VERIFIED"
+    DISABLED = "DISABLED"
+
+
+class CredentialStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
+
+
+class RuleType(str, enum.Enum):
+    EARNING = "EARNING"
+    DEDUCTION = "DEDUCTION"
+    # An intermediate result other rules reference, e.g. DAILY_SALARY.
+    INTERMEDIATE = "INTERMEDIATE"
 
 
 class EventType(str, enum.Enum):
@@ -193,6 +219,15 @@ class Employee(Base):
     status: Mapped[EmployeeStatus] = mapped_column(
         Enum(EmployeeStatus), default=EmployeeStatus.ACTIVE
     )
+    biometric_status: Mapped[BiometricStatus] = mapped_column(
+        Enum(BiometricStatus), default=BiometricStatus.NOT_REGISTERED, nullable=False
+    )
+    biometric_registered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    biometric_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    biometric_verified_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    biometric_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     department: Mapped[Department | None] = relationship()
@@ -236,9 +271,14 @@ class WebAuthnCredential(Base):
     credential_type: Mapped[str] = mapped_column(String(32), default="public-key")
     transports: Mapped[str | None] = mapped_column(String(160), nullable=True)
     device_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    device_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[CredentialStatus] = mapped_column(
+        Enum(CredentialStatus), default=CredentialStatus.ACTIVE, nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class WebAuthnChallenge(Base):
@@ -449,6 +489,12 @@ class PayrollRun(Base):
     deduction_total: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     net_total: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     calculated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Which rule set produced these figures - pinned so a later rule change
+    # cannot silently reinterpret a historical run.
+    rule_set_id: Mapped[int | None] = mapped_column(
+        ForeignKey("payroll_rule_sets.id"), nullable=True
+    )
+    rule_set_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -508,7 +554,20 @@ class Payslip(Base):
     employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     payslip_number: Mapped[str] = mapped_column(String(64), unique=True)
     snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    # The template definition as it was at generation time. Kept with the
+    # payslip so re-rendering an old payslip reproduces it exactly, however
+    # much the live template has changed since.
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("payslip_templates.id"), nullable=True
+    )
+    template_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    template_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pdf_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gross_salary: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    total_deductions: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    net_salary: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    regenerated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class AuditLog(Base):
@@ -568,3 +627,78 @@ class EnrollmentToken(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PayrollRuleSet(Base):
+    """A versioned collection of payroll rules belonging to one tenant."""
+
+    __tablename__ = "payroll_rule_sets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    effective_from: Mapped[date] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    rules: Mapped[list[PayrollRule]] = relationship(
+        back_populates="rule_set", cascade="all, delete-orphan"
+    )
+
+
+class PayrollRule(Base):
+    """One configurable payroll line.
+
+    ``code`` is the variable other rules refer to (BASIC, HRA, ...); ``formula``
+    is evaluated by the safe expression evaluator, never by exec/eval.
+    """
+
+    __tablename__ = "payroll_rules"
+    __table_args__ = (
+        UniqueConstraint("rule_set_id", "code", "version", name="uq_rule_set_code_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    rule_set_id: Mapped[int] = mapped_column(ForeignKey("payroll_rule_sets.id"), index=True)
+    code: Mapped[str] = mapped_column(String(48), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    rule_type: Mapped[RuleType] = mapped_column(Enum(RuleType))
+    formula: Mapped[str] = mapped_column(Text)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    show_on_payslip: Mapped[bool] = mapped_column(Boolean, default=True)
+    # A rule that evaluates to zero is normally hidden from the payslip.
+    show_if_zero: Mapped[bool] = mapped_column(Boolean, default=False)
+    effective_from: Mapped[date] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    rule_set: Mapped[PayrollRuleSet] = relationship(back_populates="rules")
+
+
+class PayslipTemplate(Base):
+    """A versioned payslip layout. Presentation only - never affects figures."""
+
+    __tablename__ = "payslip_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    template_data: Mapped[str] = mapped_column(Text, default="{}")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    effective_from: Mapped[date] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

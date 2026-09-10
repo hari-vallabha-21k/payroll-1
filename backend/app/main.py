@@ -2,22 +2,26 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import models  # noqa: F401  (import registers the tables)
 from .config import get_settings
-from .db import Base, SessionLocal, engine
+from .db import SessionLocal
+from .migrate import upgrade_database
 from .ratelimit import RateLimitMiddleware
 from .routers import (
     attendance,
     auth,
+    biometric,
     devices,
     employees,
     leave,
     payroll,
+    payroll_rules,
+    payslip_templates,
     reports,
     salary,
     shifts,
@@ -47,7 +51,8 @@ PAGES = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    # Schema is owned by Alembic; a pre-Alembic database is stamped, not rebuilt.
+    upgrade_database()
     if settings.seed_demo_data:
         with SessionLocal() as db:
             seed(db)
@@ -84,12 +89,15 @@ app.add_middleware(RateLimitMiddleware, limit=30)
 for router in (
     auth.router,
     employees.router,
+    biometric.router,
     shifts.router,
     webauthn.router,
     attendance.router,
     leave.router,
     salary.router,
     payroll.router,
+    payroll_rules.router,
+    payslip_templates.router,
     devices.router,
     reports.router,
     tenant_settings.router,
@@ -142,6 +150,21 @@ def root():
     if (FRONTEND_DIR / PAGES["/admin"]).is_file():
         return RedirectResponse("/admin")
     return serve_page(PAGES["/admin"])
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """A tiny inline icon, so pages do not log a 404 for a missing favicon."""
+    return Response(
+        content=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+            '<rect width="32" height="32" rx="6" fill="#2563eb"/>'
+            '<text x="16" y="22" font-size="18" font-family="sans-serif" '
+            'fill="#fff" text-anchor="middle">\u20b9</text></svg>'
+        ).encode("utf-8"),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/admin", include_in_schema=False)

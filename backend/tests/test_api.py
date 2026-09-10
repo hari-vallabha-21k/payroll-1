@@ -204,15 +204,17 @@ def test_kiosk_lookup_and_missing_credential(client, auth, kiosk_employee_code):
     )
     assert lookup.status_code == 200
     assert lookup.json()["has_biometric"] is False
+    assert lookup.json()["biometric_status"] == "NOT_REGISTERED"
+    assert lookup.json()["can_authenticate"] is False
     assert lookup.json()["next_action"] == "CHECK_IN"
 
-    # No credential registered yet -> the ceremony cannot start.
+    # Not verified -> the ceremony is refused before it can start.
     options = client.post(
         "/api/webauthn/authenticate/options",
         json={"employee_code": kiosk_employee_code, "tenant_code": "REST001"},
     )
-    assert options.status_code == 400
-    assert "No biometric credential" in options.json()["detail"]
+    assert options.status_code == 403
+    assert "has not been verified" in options.json()["detail"]
 
     assert client.post("/api/webauthn/lookup", json={"employee_code": "NOPE"}).status_code == 404
 
