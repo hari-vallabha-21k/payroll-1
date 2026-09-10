@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Register Your Fingerprint</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="kiosk">
+    <section class="card">
+      <h1>Register your phone</h1>
+      <p class="sub">
+        Your fingerprint never leaves this phone. Your device signs a one-time challenge,
+        and only the public key is stored.
+      </p>
+
+      <label for="label">Device name (optional)</label>
+      <input id="label" placeholder="Rahul's phone" autocomplete="off" />
+
+      <button id="register">Register with Fingerprint</button>
+      <div class="status" id="status">Ready to register</div>
+    </section>
+  </main>
+
+  <script src="/static/webauthn-client.js"></script>
+  <script>
+    const token = new URLSearchParams(location.search).get('token');
+    const statusBox = document.getElementById('status');
+    const registerBtn = document.getElementById('register');
+
+    function setStatus(text, kind) {
+      statusBox.textContent = text;
+      statusBox.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    if (!token) {
+      setStatus('This enrolment link is missing its token. Ask your manager for a new one.', 'bad');
+      registerBtn.disabled = true;
+    }
+
+    registerBtn.addEventListener('click', async () => {
+      registerBtn.disabled = true;
+      try {
+        if (!(await platformAuthenticatorAvailable())) {
+          throw new Error('No biometric authenticator on this device, or the page is not served over HTTPS.');
+        }
+        setStatus('Requesting registration options…', 'busy');
+        const options = await apiPost('/api/webauthn/register/options', { token });
+
+        setStatus('Touch the fingerprint sensor…', 'busy');
+        const credential = await createCredential(options);
+
+        const saved = await apiPost('/api/webauthn/register/verify', {
+          token,
+          credential,
+          device_label: document.getElementById('label').value.trim() || null,
+        });
+        setStatus(
+          `Registered. You can now check in from the attendance page.\nCredential: ${saved.credential_id.slice(0, 16)}…`,
+          'ok'
+        );
+      } catch (err) {
+        setStatus(err.message || 'Registration failed. Please try again.', 'bad');
+        registerBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

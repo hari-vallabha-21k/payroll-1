@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Payroll Admin</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="shell">
+      <h1>Payroll &amp; Attendance</h1>
+      <div id="session" class="hidden">
+        <span class="muted" id="whoami" style="color:#cbd5e1"></span>
+        <button id="logout" class="secondary">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <!-- login -->
+    <section id="login-view" class="panel" style="max-width:420px;margin:40px auto;">
+      <h2>Sign in</h2>
+      <label for="email">Email</label>
+      <input id="email" type="email" value="admin@abcrestaurant.in" />
+      <label for="password" style="margin-top:12px">Password</label>
+      <input id="password" type="password" value="admin12345" />
+      <button id="login">Sign in</button>
+      <div class="status hidden" id="login-status"></div>
+    </section>
+
+    <!-- app -->
+    <div id="app-view" class="hidden">
+      <nav class="tabs">
+        <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="employees">Employees</button>
+        <button data-tab="attendance">Attendance</button>
+        <button data-tab="leave">Leave</button>
+        <button data-tab="payroll">Payroll</button>
+        <button data-tab="devices">Devices</button>
+      </nav>
+
+      <section id="tab-dashboard" class="tab">
+        <div class="panel">
+          <h2>Today's attendance</h2>
+          <div class="grid" id="stats"></div>
+        </div>
+        <div class="panel">
+          <h2>Alerts</h2>
+          <div id="alerts"><p class="muted">Nothing needs attention.</p></div>
+        </div>
+        <div class="panel">
+          <h2>Latest payroll</h2>
+          <div id="latest-payroll" class="muted">No payroll run yet.</div>
+        </div>
+      </section>
+
+      <section id="tab-employees" class="tab hidden">
+        <div class="panel">
+          <h2>Add employee</h2>
+          <div class="row">
+            <div><label>Employee ID</label><input id="e-code" placeholder="EMP004" /></div>
+            <div><label>First name</label><input id="e-first" /></div>
+            <div><label>Last name</label><input id="e-last" /></div>
+            <div><label>Joining date</label><input id="e-join" type="date" /></div>
+            <div><label>Shift</label><select id="e-shift"></select></div>
+            <button id="e-save">Add</button>
+          </div>
+          <div class="status hidden" id="e-status"></div>
+        </div>
+        <div class="panel">
+          <h2>Employees</h2>
+          <div class="table-wrap"><table id="employee-table"></table></div>
+        </div>
+      </section>
+
+      <section id="tab-attendance" class="tab hidden">
+        <div class="panel">
+          <h2>Daily attendance</h2>
+          <div class="row">
+            <div><label>Date</label><input id="a-date" type="date" /></div>
+            <button id="a-load">Load</button>
+            <button id="a-process" class="secondary">Reprocess day</button>
+            <button id="a-csv" class="secondary">Export CSV</button>
+          </div>
+          <div class="table-wrap" style="margin-top:12px"><table id="attendance-table"></table></div>
+        </div>
+        <div class="panel">
+          <h2>Manual punch (audited)</h2>
+          <div class="row">
+            <div><label>Employee ID</label><input id="p-code" placeholder="EMP001" /></div>
+            <div><label>Type</label><select id="p-type"><option>CHECK_IN</option><option>CHECK_OUT</option></select></div>
+            <div><label>Time</label><input id="p-time" type="datetime-local" /></div>
+            <div><label>Note</label><input id="p-note" placeholder="Forgot to check out" /></div>
+            <button id="p-save">Record</button>
+          </div>
+          <div class="status hidden" id="p-status"></div>
+        </div>
+      </section>
+
+      <section id="tab-leave" class="tab hidden">
+        <div class="panel">
+          <h2>Leave requests</h2>
+          <div class="table-wrap"><table id="leave-table"></table></div>
+        </div>
+      </section>
+
+      <section id="tab-payroll" class="tab hidden">
+        <div class="panel">
+          <h2>Run payroll</h2>
+          <div class="row">
+            <div><label>Month</label><input id="pr-month" type="month" /></div>
+            <button id="pr-calc">Calculate</button>
+            <button id="pr-approve" class="secondary">Approve</button>
+            <button id="pr-slips" class="secondary">Generate payslips</button>
+          </div>
+          <div class="status hidden" id="pr-status"></div>
+          <div class="table-wrap" style="margin-top:12px"><table id="payroll-table"></table></div>
+        </div>
+        <div class="panel">
+          <h2>Payroll runs</h2>
+          <div class="table-wrap"><table id="runs-table"></table></div>
+        </div>
+      </section>
+
+      <section id="tab-devices" class="tab hidden">
+        <div class="panel">
+          <h2>Register biometric device</h2>
+          <p class="muted">
+            Attendance from a real machine arrives through a connector that posts to
+            <code>/api/devices/{id}/sync</code> using the device key. The payroll engine
+            treats those punches exactly like WebAuthn ones.
+          </p>
+          <div class="row">
+            <div><label>Device code</label><input id="d-code" placeholder="BIO001" /></div>
+            <div><label>Name</label><input id="d-name" placeholder="Main Entrance" /></div>
+            <div><label>Brand</label><input id="d-brand" placeholder="ZKTeco" /></div>
+            <div><label>IP</label><input id="d-ip" placeholder="192.168.1.50" /></div>
+            <div><label>Port</label><input id="d-port" type="number" placeholder="4370" /></div>
+            <button id="d-save">Register</button>
+          </div>
+          <div class="status hidden" id="d-status"></div>
+        </div>
+        <div class="panel">
+          <h2>Devices</h2>
+          <div class="table-wrap"><table id="device-table"></table></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+-r requirements.txt
+# Browser end-to-end test (skipped automatically when unavailable)
+playwright==1.49.1
+ruff==0.8.6
+black==24.10.0

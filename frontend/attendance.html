@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Employee Attendance</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="kiosk">
+    <section class="card">
+      <h1 id="restaurant">Employee Attendance</h1>
+      <p class="sub">Verify with your phone's fingerprint to check in or out.</p>
+
+      <label for="code">Employee ID</label>
+      <input id="code" autocomplete="off" autocapitalize="characters" placeholder="EMP001" />
+
+      <button id="verify">Verify with Fingerprint</button>
+      <button id="reset" class="secondary hidden">Another employee</button>
+
+      <div class="status" id="status">Ready for attendance</div>
+      <p class="muted" id="detail"></p>
+    </section>
+  </main>
+
+  <script src="/static/webauthn-client.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const tenantCode = params.get('tenant');
+
+    const codeInput = document.getElementById('code');
+    const verifyBtn = document.getElementById('verify');
+    const resetBtn = document.getElementById('reset');
+    const statusBox = document.getElementById('status');
+    const detail = document.getElementById('detail');
+
+    const remembered = localStorage.getItem('employee_code');
+    if (remembered) codeInput.value = remembered;
+
+    function setStatus(text, kind) {
+      statusBox.textContent = text;
+      statusBox.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    function minutes(total) {
+      return `${Math.floor(total / 60)}h ${total % 60}m`;
+    }
+
+    async function punch() {
+      const employeeCode = codeInput.value.trim().toUpperCase();
+      if (!employeeCode) {
+        setStatus('Enter your Employee ID first.', 'bad');
+        return;
+      }
+      if (!(await platformAuthenticatorAvailable())) {
+        setStatus(
+          'This device has no biometric authenticator available, or the page is not on HTTPS. ' +
+          'Open this link on your phone over HTTPS (or localhost) and try again.',
+          'bad'
+        );
+        return;
+      }
+
+      verifyBtn.disabled = true;
+      detail.textContent = '';
+      try {
+        setStatus('Looking up employee…', 'busy');
+        const who = await apiPost('/api/webauthn/lookup', {
+          employee_code: employeeCode,
+          tenant_code: tenantCode,
+        });
+        if (!who.has_biometric) {
+          setStatus(
+            `${who.employee_name}: no biometric registered yet. Ask your manager for an enrolment link.`,
+            'bad'
+          );
+          return;
+        }
+
+        const action = who.next_action === 'CHECK_IN' ? 'check in' : 'check out';
+        setStatus(`${who.employee_name} — touch the sensor to ${action}…`, 'busy');
+
+        const options = await apiPost('/api/webauthn/authenticate/options', {
+          employee_code: employeeCode,
+          tenant_code: tenantCode,
+        });
+        const credential = await getAssertion(options);
+
+        const result = await apiPost('/api/webauthn/authenticate/verify', {
+          employee_code: employeeCode,
+          tenant_code: tenantCode,
+          credential,
+        });
+
+        localStorage.setItem('employee_code', employeeCode);
+        setStatus(`${result.employee_name}\n${result.message}`, 'ok');
+        if (result.daily) {
+          const d = result.daily;
+          detail.textContent =
+            `Worked today: ${minutes(d.worked_minutes)}` +
+            (d.late_minutes ? ` · late ${d.late_minutes}m` : '') +
+            (d.overtime_minutes ? ` · overtime ${minutes(d.overtime_minutes)}` : '') +
+            ` · ${d.status.replace('_', ' ').toLowerCase()}`;
+        }
+        resetBtn.classList.remove('hidden');
+      } catch (err) {
+        if (err.name === 'NotAllowedError') {
+          setStatus('Biometric verification was cancelled or timed out. Please try again.', 'bad');
+        } else {
+          setStatus(err.message || 'Biometric verification failed. Please try again.', 'bad');
+        }
+      } finally {
+        verifyBtn.disabled = false;
+      }
+    }
+
+    verifyBtn.addEventListener('click', punch);
+    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') punch(); });
+    resetBtn.addEventListener('click', () => {
+      codeInput.value = '';
+      localStorage.removeItem('employee_code');
+      detail.textContent = '';
+      resetBtn.classList.add('hidden');
+      setStatus('Ready for attendance');
+      codeInput.focus();
+    });
+  </script>
+</body>
+</html>
