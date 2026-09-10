@@ -30,8 +30,8 @@ jobs:
 
       - name: Lint
         run: |
-          ruff check backend connector
-          black --check backend connector
+          ruff check backend connector check_setup.py
+          black --check backend connector check_setup.py
 
       - name: Test
         run: pytest -q
