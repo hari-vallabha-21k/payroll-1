@@ -25,6 +25,7 @@ FRONTEND_FILES = [
     "webauthn-client.js",
     "styles.css",
 ]
+APP_ID = "payroll-attendance"
 REQUIRED_MODULES = ["fastapi", "uvicorn", "sqlalchemy", "pydantic", "jwt", "bcrypt", "webauthn"]
 OK, BAD, WARN = "  OK  ", " FAIL ", " WARN "
 problems: list[str] = []
@@ -129,11 +130,22 @@ def check_server(port: int = 8000) -> None:
         line(WARN, f"Could not read {url}: {exc}")
         return
 
-    if "frontend_ready" not in payload:
-        line(BAD, f"Server on port {port} is running OLD code (health: {payload})")
+    other = payload.get("app")
+    if other and other != APP_ID:
+        line(BAD, f"Port {port} is held by a DIFFERENT application: {other!r}")
         problems.append(
-            "The running server predates the frontend fix. Stop it (Ctrl+C), pull the "
-            "latest commit, then start uvicorn again."
+            f"Another app ({other}) already owns port {port}, so the browser never reaches "
+            f"payroll. Either stop it, or run payroll elsewhere: "
+            f"uvicorn backend.app.main:app --reload --port 8001"
+        )
+        return
+
+    if "frontend_ready" not in payload:
+        line(BAD, f"Port {port} answered, but not as this app (health: {payload})")
+        problems.append(
+            f"Whatever is on port {port} is either another service or a payroll build "
+            "predating the frontend fix. Stop it, pull the latest commit, and restart - "
+            "or use --port 8001 to sidestep the clash."
         )
         return
 

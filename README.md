@@ -30,7 +30,20 @@ cp .env.example .env                 # edit JWT_SECRET before anything real
 | http://localhost:8000/attendance?tenant=REST001 | Employee attendance kiosk |
 | http://localhost:8000/enroll?token=… | Single-use biometric enrolment page |
 | http://localhost:8000/docs | OpenAPI browser |
-| http://localhost:8000/api/health | Health check — also reports whether the frontend files were found |
+| http://localhost:8000/api/health | Health check — reports `app`, and whether the frontend files were found |
+
+### Port 8000 already in use
+
+Windows in particular will let a second server bind a port that is already
+taken, so both apps start cleanly and the browser silently reaches the wrong
+one. `GET /api/health` returns `"app": "payroll-attendance"` — any other value
+means a different service holds the port. Run elsewhere with
+`--port 8001`, or stop the other app:
+
+```powershell
+netstat -ano | findstr :8000     # last column is the PID
+taskkill /PID <pid> /F
+```
 
 ### Something not working?
 

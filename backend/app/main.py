@@ -28,6 +28,7 @@ from .seed import seed
 
 settings = get_settings()
 logger = logging.getLogger("payroll")
+APP_ID = "payroll-attendance"
 
 # frontend/ sits next to backend/ in the repo. FRONTEND_DIR in the environment
 # overrides it, for deployments that put the static files somewhere else.
@@ -111,6 +112,9 @@ def health():
     absent = missing_pages()
     return {
         "status": "ok",
+        # Identifies this app, so tooling can tell it apart from another
+        # service that happens to hold the same port.
+        "app": APP_ID,
         "frontend_dir": str(FRONTEND_DIR),
         "frontend_ready": not absent,
         "missing_files": absent,

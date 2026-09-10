@@ -18,6 +18,15 @@ def test_pages_and_assets_are_served(client):
     assert client.get("/", follow_redirects=False).status_code in (200, 307)
 
 
+def test_health_identifies_this_app(client):
+    """Health names the app, so tooling can spot a foreign service on the port."""
+    from backend.app.main import APP_ID
+
+    health = client.get("/api/health").json()
+    assert health["app"] == APP_ID
+    assert health["status"] == "ok"
+
+
 def test_static_cannot_escape_the_frontend_folder(client):
     assert client.get("/static/../backend/app/config.py").status_code == 404
     assert client.get("/static/..%2F..%2Fbackend%2Fapp%2Fconfig.py").status_code == 404
