@@ -7,7 +7,7 @@ are with their phone's platform authenticator, not with a password.
 from __future__ import annotations
 
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -66,7 +66,7 @@ def resolve_employee(db: Session, employee_code: str, tenant_code: str | None) -
 
 
 def _naive_utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def resolve_token(db: Session, token: str) -> tuple[EnrollmentToken, Employee]:

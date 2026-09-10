@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
@@ -25,7 +25,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(*, user_id: int, tenant_id: int, role: str) -> str:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "tenant_id": tenant_id,

@@ -8,7 +8,7 @@ verifies it locally and signs a challenge.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -59,7 +59,7 @@ def _store_challenge(db: Session, employee: Employee, challenge: bytes, purpose:
             employee_id=employee.id,
             challenge=challenge,
             purpose=purpose,
-            expires_at=datetime.now(UTC).replace(tzinfo=None)
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
             + timedelta(seconds=CHALLENGE_TTL_SECONDS),
         )
     )
@@ -82,7 +82,7 @@ def _consume_challenge(db: Session, employee: Employee, purpose: str) -> bytes:
     )
     if record is None:
         raise WebAuthnError("No pending challenge; start the ceremony again")
-    if record.expires_at < datetime.now(UTC).replace(tzinfo=None):
+    if record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
         record.consumed = True
         db.commit()
         raise WebAuthnError("Challenge expired; please try again")

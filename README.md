@@ -14,6 +14,9 @@ multi-tenant from the first table.
 
 ## Quick start
 
+Requires **Python 3.10 or newer**. On Windows, use `py -3.11` (or `py -3.10`)
+and `.venv\Scripts\` in place of `.venv/bin/`.
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -43,6 +46,9 @@ Set `SEED_DEMO_DATA=false` for a clean database.
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
 ```
+
+CI runs these on Python 3.10, 3.11 and 3.12, so a version-specific construct
+cannot land unnoticed.
 
 25 tests: the attendance rules (against the worked examples in the brief), the
 payroll engine, the REST API end to end, and a **real browser WebAuthn

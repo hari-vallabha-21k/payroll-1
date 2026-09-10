@@ -7,7 +7,7 @@ restaurants without data ever crossing tenants.
 from __future__ import annotations
 
 import enum
-from datetime import UTC, date, datetime, time
+from datetime import date, datetime, time, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -30,7 +30,7 @@ from .db import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 class Role(str, enum.Enum):
