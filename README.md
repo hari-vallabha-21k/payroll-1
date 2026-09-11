@@ -91,7 +91,7 @@ Set `SEED_DEMO_DATA=false` for a clean database.
 CI runs these on Python 3.10, 3.11 and 3.12, so a version-specific construct
 cannot land unnoticed.
 
-122 tests: the attendance rules (against the worked examples in the brief), the
+131 tests: the attendance rules (against the worked examples in the brief), the
 payroll engine, the REST API end to end, the biometric lifecycle and its access
 control, formula safety and evaluation, rule priority and versioning, template
 rendering and version pinning, migrations from a pre-Alembic database, tenant
@@ -256,8 +256,13 @@ number and an uploaded logo — are set under **Settings → Payroll → Company
 profile**. The logo is stored inline as a data URI, so rendering a payslip
 years later never depends on fetching an external file. Employee identifiers
 the template can print (`{{pan}}`, `{{pf_number}}`, `{{esi_number}}`,
-`{{branch}}`, `{{uan}}`, `{{bank_ifsc}}`) come from the employee record and are
-all optional.
+`{{branch}}`, `{{uan}}`, `{{bank_ifsc}}`) come from the employee record, are
+all optional, and are editable on an existing employee — not only at creation.
+
+The default template prints them, and a detail field marked
+`"hide_when_empty": true` disappears when it has no value, so staff outside
+PF/ESI get no hollow `ESI Number: -` row. Drop the flag to force a row to
+print regardless. The HTML preview and the PDF follow the same rule.
 
 Templates are versioned, and **every payslip stores the template it was issued
 with**. Redesigning a template leaves issued payslips exactly as they were;

@@ -60,22 +60,35 @@
 
       <section id="tab-employees" class="tab hidden">
         <div class="panel">
-          <h2>Add employee</h2>
+          <h2 id="e-heading">Add employee</h2>
           <div class="row">
             <div><label>Employee ID</label><input id="e-code" placeholder="EMP004" /></div>
             <div><label>First name</label><input id="e-first" /></div>
             <div><label>Last name</label><input id="e-last" /></div>
             <div><label>Joining date</label><input id="e-join" type="date" /></div>
-            <div><label>Shift</label><select id="e-shift"></select></div>
+            <div><label>Status</label><select id="e-status-select">
+              <option>ACTIVE</option><option>ONBOARDING</option>
+              <option>INACTIVE</option><option>TERMINATED</option>
+            </select></div>
           </div>
           <div class="row" style="margin-top:10px">
-            <div><label>Designation</label><input id="e-designation" placeholder="Chef" /></div>
+            <div><label>Department</label><select id="e-department"></select></div>
+            <div><label>Designation</label><select id="e-designation"></select></div>
+            <div><label>Shift</label><select id="e-shift"></select></div>
             <div><label>Branch</label><input id="e-branch" placeholder="Main Branch" /></div>
+            <button id="e-add-org" class="secondary" title="Add a department or designation">+ Dept / Role</button>
+          </div>
+          <div class="row" style="margin-top:10px">
             <div><label>PAN</label><input id="e-pan" placeholder="ABCDE1234F" /></div>
             <div><label>PF number</label><input id="e-pf" /></div>
             <div><label>ESI number</label><input id="e-esi" /></div>
+            <div><label>UAN</label><input id="e-uan" /></div>
             <div><label>Bank A/C</label><input id="e-bank" /></div>
-            <button id="e-save">Add</button>
+            <div><label>IFSC</label><input id="e-ifsc" /></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button id="e-save">Add employee</button>
+            <button id="e-cancel" class="secondary hidden">Cancel edit</button>
           </div>
           <div class="status hidden" id="e-status"></div>
         </div>

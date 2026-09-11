@@ -57,6 +57,12 @@ DEFAULT_TEMPLATE: dict[str, Any] = {
                 {"label": "Department", "value": "{{department}}"},
                 {"label": "Date of Joining", "value": "{{date_of_joining}}"},
                 {"label": "Bank A/C", "value": "{{bank_account}}"},
+                # Printed when the employee has them, omitted when they do not.
+                {"label": "Branch", "value": "{{branch}}", "hide_when_empty": True},
+                {"label": "PAN", "value": "{{pan}}", "hide_when_empty": True},
+                {"label": "PF Number", "value": "{{pf_number}}", "hide_when_empty": True},
+                {"label": "ESI Number", "value": "{{esi_number}}", "hide_when_empty": True},
+                {"label": "UAN", "value": "{{uan}}", "hide_when_empty": True},
             ],
         },
         {
@@ -228,6 +234,29 @@ def substitute(text: str, variables: dict[str, str]) -> str:
     return PLACEHOLDER.sub(lambda match: str(variables.get(match.group(1).lower(), "")), text)
 
 
+EMPTY_VALUES = {"", "-", "None"}
+
+
+def is_blank(value: str) -> bool:
+    """A detail value that carries no information."""
+    return value is None or str(value).strip() in EMPTY_VALUES
+
+
+def visible_fields(section: dict, variables: dict[str, str]) -> list[tuple[str, str]]:
+    """Resolve a detail section's fields, dropping the ones with nothing to say.
+
+    A field marked ``hide_when_empty`` disappears rather than printing a dash,
+    so an employee outside PF/ESI gets no hollow rows.
+    """
+    resolved = []
+    for field in section.get("fields", []):
+        value = substitute(field.get("value", ""), variables)
+        if field.get("hide_when_empty") and is_blank(value):
+            continue
+        resolved.append((field.get("label", ""), value))
+    return resolved
+
+
 def _rows(components: list[dict], hide_zero: bool, symbol: str) -> list[tuple[str, str]]:
     rows = []
     for component in components:
@@ -277,9 +306,9 @@ def render_html(template_data: dict, snapshot: dict) -> str:
 
         elif kind in ("employee_details", "attendance"):
             cells = "".join(
-                f'<div class="cell"><span class="k">{html.escape(field.get("label", ""))}</span>'
-                f'<span class="v">{esc(field.get("value", ""))}</span></div>'
-                for field in section.get("fields", [])
+                f'<div class="cell"><span class="k">{html.escape(label)}</span>'
+                f'<span class="v">{html.escape(value)}</span></div>'
+                for label, value in visible_fields(section, variables)
             )
             heading = f'<h3>{html.escape(section["title"])}</h3>' if section.get("title") else ""
             blocks.append(f'{heading}<section class="details">{cells}</section>')

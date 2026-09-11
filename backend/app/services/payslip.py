@@ -144,10 +144,10 @@ def render_pdf(payslip: Payslip) -> bytes:
     subtle = ParagraphStyle("subtle", parent=styles["Normal"], textColor=colors.HexColor("#555555"))
     story = []
 
-    def field_table(fields: list[dict]) -> Table:
+    def field_table(section: dict) -> Table:
         rows, pair = [], []
-        for field in fields:
-            pair += [field.get("label", ""), text(field.get("value", ""))]
+        for label, value in payslip_template.visible_fields(section, variables):
+            pair += [label, value]
             if len(pair) == 4:
                 rows.append(pair)
                 pair = []
@@ -185,7 +185,7 @@ def render_pdf(payslip: Payslip) -> bytes:
             story += [Paragraph(text(section.get("text", "")), centered), Spacer(1, 5 * mm)]
 
         elif kind in ("employee_details", "attendance"):
-            story += [field_table(section.get("fields", [])), Spacer(1, 5 * mm)]
+            story += [field_table(section), Spacer(1, 5 * mm)]
 
         elif kind == "earnings_deductions":
             hide_zero = section.get("hide_zero_rows", True)

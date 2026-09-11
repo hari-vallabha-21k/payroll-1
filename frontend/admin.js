@@ -6,6 +6,7 @@ const state = {
   shifts: [],
   run: null,
   ruleSet: null,
+  editingEmployee: null,
   template: null,
   templateData: null,
 };
@@ -107,6 +108,7 @@ async function startApp() {
   $('e-shift').innerHTML =
     '<option value="">No shift</option>' +
     state.shifts.map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
+  await loadOrgLists();
 
   $('rs-from').value = $('rule-from').value = $('tpl-from').value = today();
 
@@ -153,17 +155,22 @@ async function loadEmployees() {
   const employees = await api('/api/employees');
   table(
     $('employee-table'),
-    ['ID', 'Name', 'Department', 'Shift', 'Biometric', 'Status', ''],
+    ['ID', 'Name', 'Department', 'Designation', 'Shift', 'Biometric', 'Status', ''],
     employees,
     (e) => `<tr>
       <td>${e.employee_code}</td>
       <td>${e.full_name}</td>
       <td>${e.department ? e.department.name : '—'}</td>
+      <td>${e.designation ? e.designation.name : '—'}</td>
       <td>${e.shift ? e.shift.name : '—'}</td>
       <td>${pill(e.biometric_status)}</td>
       <td>${pill(e.status)}</td>
-      <td><button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
-            onclick="openBiometric(${e.id})">Biometric</button></td>
+      <td>
+        <button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
+          onclick="editEmployee(${e.id})">Edit</button>
+        <button class="secondary" style="width:auto;margin:0;padding:6px 10px;font-size:13px"
+          onclick="openBiometric(${e.id})">Biometric</button>
+      </td>
     </tr>`
   );
 }
@@ -181,34 +188,116 @@ async function issueEnrollment(employeeId) {
   }
 }
 
-async function addEmployee() {
+function employeeForm() {
+  return {
+    first_name: $('e-first').value.trim(),
+    last_name: $('e-last').value.trim(),
+    date_of_joining: $('e-join').value,
+    status: $('e-status-select').value,
+    department_id: $('e-department').value ? Number($('e-department').value) : null,
+    designation_id: $('e-designation').value ? Number($('e-designation').value) : null,
+    shift_id: $('e-shift').value ? Number($('e-shift').value) : null,
+    branch: $('e-branch').value.trim() || null,
+    pan: $('e-pan').value.trim().toUpperCase() || null,
+    pf_number: $('e-pf').value.trim() || null,
+    esi_number: $('e-esi').value.trim() || null,
+    uan: $('e-uan').value.trim() || null,
+    bank_account: $('e-bank').value.trim() || null,
+    bank_ifsc: $('e-ifsc').value.trim().toUpperCase() || null,
+  };
+}
+
+function resetEmployeeForm() {
+  state.editingEmployee = null;
+  $('e-heading').textContent = 'Add employee';
+  $('e-save').textContent = 'Add employee';
+  $('e-cancel').classList.add('hidden');
+  $('e-code').disabled = false;
+  ['e-code', 'e-first', 'e-last', 'e-branch', 'e-pan', 'e-pf', 'e-esi', 'e-uan', 'e-bank', 'e-ifsc']
+    .forEach((id) => {
+      $(id).value = '';
+    });
+  $('e-join').value = today();
+  $('e-status-select').value = 'ACTIVE';
+  ['e-department', 'e-designation', 'e-shift'].forEach((id) => {
+    $(id).value = '';
+  });
+}
+
+async function editEmployee(employeeId) {
+  const employee = await api(`/api/employees/${employeeId}`);
+  state.editingEmployee = employeeId;
+  $('e-heading').textContent = `Edit ${employee.employee_code}`;
+  $('e-save').textContent = 'Save changes';
+  $('e-cancel').classList.remove('hidden');
+
+  $('e-code').value = employee.employee_code;
+  $('e-code').disabled = true; // the code identifies the employee everywhere
+  $('e-first').value = employee.first_name || '';
+  $('e-last').value = employee.last_name || '';
+  $('e-join').value = employee.date_of_joining || '';
+  $('e-status-select').value = employee.status;
+  $('e-department').value = employee.department ? employee.department.id : '';
+  $('e-designation').value = employee.designation ? employee.designation.id : '';
+  $('e-shift').value = employee.shift ? employee.shift.id : '';
+  $('e-branch').value = employee.branch || '';
+  $('e-pan').value = employee.pan || '';
+  $('e-pf').value = employee.pf_number || '';
+  $('e-esi').value = employee.esi_number || '';
+  $('e-uan').value = employee.uan || '';
+  $('e-bank').value = employee.bank_account || '';
+  $('e-ifsc').value = employee.bank_ifsc || '';
+
+  $('e-heading').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function saveEmployee() {
   const status = $('e-status');
   status.classList.remove('hidden');
   try {
-    await api('/api/employees', {
-      method: 'POST',
-      body: {
-        employee_code: $('e-code').value.trim().toUpperCase(),
-        first_name: $('e-first').value.trim(),
-        last_name: $('e-last').value.trim(),
-        date_of_joining: $('e-join').value,
-        shift_id: $('e-shift').value ? Number($('e-shift').value) : null,
-        branch: $('e-branch').value.trim() || null,
-        pan: $('e-pan').value.trim().toUpperCase() || null,
-        pf_number: $('e-pf').value.trim() || null,
-        esi_number: $('e-esi').value.trim() || null,
-        bank_account: $('e-bank').value.trim() || null,
-      },
-    });
-    show(status, 'ok', 'Employee added.');
-    ['e-code', 'e-first', 'e-last', 'e-branch', 'e-pan', 'e-pf', 'e-esi', 'e-bank'].forEach(
-      (id) => {
-        $(id).value = '';
-      }
-    );
+    if (state.editingEmployee) {
+      await api(`/api/employees/${state.editingEmployee}`, {
+        method: 'PUT',
+        body: employeeForm(),
+      });
+      show(status, 'ok', 'Employee updated.');
+    } else {
+      await api('/api/employees', {
+        method: 'POST',
+        body: { employee_code: $('e-code').value.trim().toUpperCase(), ...employeeForm() },
+      });
+      show(status, 'ok', 'Employee added.');
+    }
+    resetEmployeeForm();
     await loadEmployees();
   } catch (err) {
     show(status, 'bad', err.message);
+  }
+}
+
+async function loadOrgLists() {
+  const [departments, designations] = await Promise.all([
+    api('/api/departments'),
+    api('/api/designations'),
+  ]);
+  const options = (items) =>
+    '<option value="">—</option>' +
+    items.map((item) => `<option value="${item.id}">${item.name}</option>`).join('');
+  $('e-department').innerHTML = options(departments);
+  $('e-designation').innerHTML = options(designations);
+}
+
+async function addOrgEntry() {
+  const kind = window.prompt('Add a "department" or a "designation"?', 'designation');
+  if (!kind) return;
+  const path = kind.trim().toLowerCase().startsWith('dep') ? 'departments' : 'designations';
+  const name = window.prompt(`Name of the new ${path.slice(0, -1)}:`);
+  if (!name) return;
+  try {
+    await api(`/api/${path}`, { method: 'POST', body: { name: name.trim() } });
+    await loadOrgLists();
+  } catch (err) {
+    alert(err.message);
   }
 }
 
@@ -479,7 +568,9 @@ $('logout').addEventListener('click', async () => {
   try { await api('/api/auth/logout', { method: 'POST' }); } catch (err) { /* token already gone */ }
   signOut();
 });
-$('e-save').addEventListener('click', addEmployee);
+$('e-save').addEventListener('click', saveEmployee);
+$('e-cancel').addEventListener('click', resetEmployeeForm);
+$('e-add-org').addEventListener('click', addOrgEntry);
 $('a-load').addEventListener('click', loadAttendance);
 $('a-process').addEventListener('click', reprocessDay);
 $('a-csv').addEventListener('click', exportCsv);
