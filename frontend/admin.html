@@ -67,6 +67,14 @@
             <div><label>Last name</label><input id="e-last" /></div>
             <div><label>Joining date</label><input id="e-join" type="date" /></div>
             <div><label>Shift</label><select id="e-shift"></select></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div><label>Designation</label><input id="e-designation" placeholder="Chef" /></div>
+            <div><label>Branch</label><input id="e-branch" placeholder="Main Branch" /></div>
+            <div><label>PAN</label><input id="e-pan" placeholder="ABCDE1234F" /></div>
+            <div><label>PF number</label><input id="e-pf" /></div>
+            <div><label>ESI number</label><input id="e-esi" /></div>
+            <div><label>Bank A/C</label><input id="e-bank" /></div>
             <button id="e-save">Add</button>
           </div>
           <div class="status hidden" id="e-status"></div>
@@ -183,6 +191,31 @@
       </section>
 
       <section id="tab-templates" class="tab hidden">
+        <div class="panel">
+          <h2>Company profile <span class="muted">— printed on the payslip header</span></h2>
+          <p class="muted">
+            Changing these does not alter payslips already issued; each one keeps
+            the company details it was generated with.
+          </p>
+          <div class="row">
+            <div><label>Company name</label><input id="co-name" /></div>
+            <div><label>Phone</label><input id="co-phone" /></div>
+            <div><label>Email</label><input id="co-email" /></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div style="flex:2 1 280px"><label>Address</label><input id="co-address" /></div>
+            <div><label>GST number</label><input id="co-gst" /></div>
+            <div><label>Registration number</label><input id="co-reg" /></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <div><label>Logo (PNG, JPEG, SVG or WebP, max 512&nbsp;KB)</label>
+              <input id="co-logo" type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" /></div>
+            <div id="co-logo-preview" style="flex:0 0 auto"></div>
+            <button id="co-save">Save company profile</button>
+          </div>
+          <div class="status hidden" id="co-status"></div>
+        </div>
+
         <div class="panel">
           <h2>Payslip templates</h2>
           <p class="muted">

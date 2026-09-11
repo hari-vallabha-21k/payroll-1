@@ -196,6 +196,8 @@ def build_context(snapshot: dict, currency_symbol: str = "₹") -> RenderContext
         "pan": employee.get("pan") or "-",
         "pf_number": employee.get("pf_number") or "-",
         "esi_number": employee.get("esi_number") or "-",
+        "uan": employee.get("uan") or "-",
+        "bank_ifsc": employee.get("bank_ifsc") or "-",
         "pay_period": snapshot.get("period", {}).get("label", ""),
         "working_days": str(attendance.get("working_days", "")),
         "payable_days": str(attendance.get("payable_days", "")),

@@ -216,6 +216,14 @@ class Employee(Base):
     )
     shift_id: Mapped[int | None] = mapped_column(ForeignKey("shifts.id"), nullable=True)
     bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bank_ifsc: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    branch: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Statutory identifiers printed on the payslip. Optional: a restaurant may
+    # employ staff who fall outside PF/ESI.
+    pan: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    pf_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    esi_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    uan: Mapped[str | None] = mapped_column(String(24), nullable=True)
     status: Mapped[EmployeeStatus] = mapped_column(
         Enum(EmployeeStatus), default=EmployeeStatus.ACTIVE
     )

@@ -284,7 +284,23 @@ def preview_template(
         template_data = template_service.DEFAULT_TEMPLATE
     _validate_or_400(template_data)
 
-    snapshot = SAMPLE_SNAPSHOT
+    # Preview against this tenant's real company details, so an administrator
+    # sees their own header rather than placeholder text.
+    snapshot = json.loads(json.dumps(SAMPLE_SNAPSHOT))
+    from .tenant_settings import get_company_profile
+
+    company = get_company_profile(user=user, db=db)
+    snapshot["tenant"] = {
+        "name": company.name or snapshot["tenant"]["name"],
+        "currency": company.currency,
+        "address": company.address,
+        "phone": company.phone,
+        "email": company.email,
+        "gst_number": company.gst_number,
+        "registration_number": company.registration_number,
+        "logo_url": company.logo,
+    }
+
     if payload.payslip_id is not None:
         from ..models import Payslip
 

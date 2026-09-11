@@ -60,7 +60,12 @@ def build_snapshot(tenant: Tenant, run: PayrollRun, item: PayrollItem, employee:
             "designation": employee.designation.name if employee.designation else None,
             "date_of_joining": str(employee.date_of_joining),
             "bank_account": employee.bank_account,
-            "branch": None,
+            "bank_ifsc": employee.bank_ifsc,
+            "branch": employee.branch,
+            "pan": employee.pan,
+            "pf_number": employee.pf_number,
+            "esi_number": employee.esi_number,
+            "uan": employee.uan,
         },
         "attendance": {
             "working_days": item.working_days,

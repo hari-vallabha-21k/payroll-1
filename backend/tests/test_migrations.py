@@ -11,6 +11,15 @@ from sqlalchemy import create_engine, inspect, text
 from backend.app import migrate
 
 
+def head_revision() -> str:
+    """The latest revision, so adding a migration does not break these tests."""
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import create_engine as _create_engine
+
+    config = migrate.alembic_config(_create_engine("sqlite://"))
+    return ScriptDirectory.from_config(config).get_current_head()
+
+
 @pytest.fixture
 def legacy_database(tmp_path):
     """A database shaped like one created by the old create_all startup.
@@ -63,7 +72,7 @@ def test_legacy_database_is_stamped_not_rebuilt(legacy_database):
     assert migrate.has_legacy_tables(engine) is True
 
     revision = migrate.upgrade_database(engine)
-    assert revision == "0002_biometric_payroll_config"
+    assert revision == head_revision()
 
     with engine.connect() as connection:
         # Existing rows survived.
@@ -100,7 +109,7 @@ def test_upgrade_is_idempotent(legacy_database):
     engine = create_engine(f"sqlite:///{legacy_database}")
     migrate.upgrade_database(engine)
     assert migrate.has_legacy_tables(engine) is False
-    assert migrate.upgrade_database(engine) == "0002_biometric_payroll_config"
+    assert migrate.upgrade_database(engine) == head_revision()
 
 
 def test_fresh_database_is_built_from_migrations(tmp_path):

@@ -91,7 +91,7 @@ Set `SEED_DEMO_DATA=false` for a clean database.
 CI runs these on Python 3.10, 3.11 and 3.12, so a version-specific construct
 cannot land unnoticed.
 
-109 tests: the attendance rules (against the worked examples in the brief), the
+122 tests: the attendance rules (against the worked examples in the brief), the
 payroll engine, the REST API end to end, the biometric lifecycle and its access
 control, formula safety and evaluation, rule priority and versioning, template
 rendering and version pinning, migrations from a pre-Alembic database, tenant
@@ -251,6 +251,14 @@ attendance, earnings/deductions, summary, footer) whose text fields accept
 employee actually has — no empty HRA row for someone without HRA, unless the
 template asks for one.
 
+Company details for the header — address, phone, email, GST, registration
+number and an uploaded logo — are set under **Settings → Payroll → Company
+profile**. The logo is stored inline as a data URI, so rendering a payslip
+years later never depends on fetching an external file. Employee identifiers
+the template can print (`{{pan}}`, `{{pf_number}}`, `{{esi_number}}`,
+`{{branch}}`, `{{uan}}`, `{{bank_ifsc}}`) come from the employee record and are
+all optional.
+
 Templates are versioned, and **every payslip stores the template it was issued
 with**. Redesigning a template leaves issued payslips exactly as they were;
 so do changes to salary, rules, designation or company details. Moving an old
@@ -344,6 +352,8 @@ POST   /api/devices/{id}/sync    GET  /api/devices/{id}/status
 
 GET    /api/dashboard   /api/reports/attendance-summary   /api/reports/attendance.csv
 GET    /api/audit-logs  /api/settings   PUT /api/settings/{key}
+GET/PUT  /api/settings/company
+POST/DELETE /api/settings/company/logo
 ```
 
 ---

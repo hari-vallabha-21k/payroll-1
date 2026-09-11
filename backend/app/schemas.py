@@ -115,6 +115,12 @@ class EmployeeCreate(BaseModel):
     employment_type: EmploymentType = EmploymentType.FULL_TIME
     shift_id: int | None = None
     bank_account: str | None = None
+    bank_ifsc: str | None = None
+    branch: str | None = None
+    pan: str | None = None
+    pf_number: str | None = None
+    esi_number: str | None = None
+    uan: str | None = None
     status: EmployeeStatus = EmployeeStatus.ACTIVE
 
 
@@ -131,6 +137,12 @@ class EmployeeUpdate(BaseModel):
     employment_type: EmploymentType | None = None
     shift_id: int | None = None
     bank_account: str | None = None
+    bank_ifsc: str | None = None
+    branch: str | None = None
+    pan: str | None = None
+    pf_number: str | None = None
+    esi_number: str | None = None
+    uan: str | None = None
     status: EmployeeStatus | None = None
 
 
@@ -145,6 +157,13 @@ class EmployeeOut(ORMModel):
     date_of_joining: date
     employment_type: EmploymentType
     status: EmployeeStatus
+    bank_account: str | None = None
+    bank_ifsc: str | None = None
+    branch: str | None = None
+    pan: str | None = None
+    pf_number: str | None = None
+    esi_number: str | None = None
+    uan: str | None = None
     biometric_status: BiometricStatus = BiometricStatus.NOT_REGISTERED
     department: NamedOut | None = None
     designation: NamedOut | None = None
@@ -640,3 +659,17 @@ class PayslipTemplatePreviewRequest(BaseModel):
     template_data: dict[str, Any] | None = None
     payslip_id: int | None = None
     format: str = Field(default="html", pattern="^(html|pdf)$")
+
+
+class CompanyProfile(BaseModel):
+    """Company details printed on payslips."""
+
+    name: str = ""
+    code: str = ""
+    currency: str = "INR"
+    address: str = ""
+    phone: str = ""
+    email: str = ""
+    gst_number: str = ""
+    registration_number: str = ""
+    logo: str = ""

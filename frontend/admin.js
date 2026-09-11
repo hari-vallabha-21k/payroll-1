@@ -119,6 +119,7 @@ async function startApp() {
     loadDevices(),
     loadRuleSets(),
     loadTemplates(),
+    loadCompany(),
   ]);
 }
 
@@ -192,10 +193,19 @@ async function addEmployee() {
         last_name: $('e-last').value.trim(),
         date_of_joining: $('e-join').value,
         shift_id: $('e-shift').value ? Number($('e-shift').value) : null,
+        branch: $('e-branch').value.trim() || null,
+        pan: $('e-pan').value.trim().toUpperCase() || null,
+        pf_number: $('e-pf').value.trim() || null,
+        esi_number: $('e-esi').value.trim() || null,
+        bank_account: $('e-bank').value.trim() || null,
       },
     });
     show(status, 'ok', 'Employee added.');
-    $('e-code').value = $('e-first').value = $('e-last').value = '';
+    ['e-code', 'e-first', 'e-last', 'e-branch', 'e-pan', 'e-pf', 'e-esi', 'e-bank'].forEach(
+      (id) => {
+        $(id).value = '';
+      }
+    );
     await loadEmployees();
   } catch (err) {
     show(status, 'bad', err.message);
@@ -488,6 +498,7 @@ $('tpl-refresh').addEventListener('click', refreshTemplatePreview);
 $('tpl-pdf').addEventListener('click', previewTemplatePdf);
 $('tpl-save').addEventListener('click', saveTemplate);
 $('tpl-accent').addEventListener('change', refreshTemplatePreview);
+$('co-save').addEventListener('click', saveCompany);
 
 if (state.token) {
   startApp().catch(signOut);
@@ -939,5 +950,70 @@ async function saveTemplate() {
     await loadTemplates();
   } catch (err) {
     show(status, 'bad', err.message);
+  }
+}
+
+
+// --- company profile -------------------------------------------------------
+async function loadCompany() {
+  const company = await api('/api/settings/company');
+  $('co-name').value = company.name || '';
+  $('co-phone').value = company.phone || '';
+  $('co-email').value = company.email || '';
+  $('co-address').value = company.address || '';
+  $('co-gst').value = company.gst_number || '';
+  $('co-reg').value = company.registration_number || '';
+  $('co-logo-preview').innerHTML = company.logo
+    ? `<img src="${company.logo}" alt="Company logo" style="max-height:48px" />
+       <button class="secondary" style="width:auto;margin:4px 0 0;padding:4px 8px;font-size:12px"
+         onclick="removeLogo()">Remove</button>`
+    : '<span class="muted">No logo</span>';
+}
+
+async function saveCompany() {
+  const status = $('co-status');
+  status.classList.remove('hidden');
+  try {
+    await api('/api/settings/company', {
+      method: 'PUT',
+      body: {
+        name: $('co-name').value.trim(),
+        phone: $('co-phone').value.trim(),
+        email: $('co-email').value.trim(),
+        address: $('co-address').value.trim(),
+        gst_number: $('co-gst').value.trim(),
+        registration_number: $('co-reg').value.trim(),
+      },
+    });
+
+    const file = $('co-logo').files[0];
+    if (file) {
+      const form = new FormData();
+      form.append('file', file);
+      const response = await fetch('/api/settings/company/logo', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${state.token}` },
+        body: form,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || 'Logo upload failed');
+      $('co-logo').value = '';
+    }
+
+    show(status, 'ok', 'Company profile saved. Payslips already issued are unchanged.');
+    await loadCompany();
+    await refreshTemplatePreview();
+  } catch (err) {
+    show(status, 'bad', err.message);
+  }
+}
+
+async function removeLogo() {
+  try {
+    await api('/api/settings/company/logo', { method: 'DELETE' });
+    await loadCompany();
+    await refreshTemplatePreview();
+  } catch (err) {
+    alert(err.message);
   }
 }
